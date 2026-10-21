@@ -1,177 +1,178 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "Oura",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "Oura ring by the official API v2, read only: sleep, readiness, activity. Not a medical device.",
+    "fr": "Bague Oura par l’API v2 officielle, lecture seule : sommeil, activité. Pas un dispositif médical."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-oura:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-oura/main/cover.png",
+  "categories": ["services"],
+  "transports": ["cloud"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": { "en": "How it works", "fr": "Fonctionnement" },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "NOT A MEDICAL DEVICE: never use it for a diagnosis or a treatment decision; its values may be late or missing. Gladys reads, through the official Oura API v2, the latest data of your Oura ring, read only: sleep, readiness and activity scores, sleep durations, lowest heart rate and heart rate variability of the night, body temperature deviation, SpO2, steps, active calories, latest heart rate. One Gladys device (Discovery tab). The ring sends its data when the Oura app syncs. It needs an app you create yourself on the Oura developer portal (OAuth2): follow the steps below or the guide. Your password is typed on the Oura page only. Health data: no history by default, never in the logs. Never tested with a real account or ring. Unofficial integration, not affiliated with Oura.",
+        "fr": "PAS UN DISPOSITIF MÉDICAL : ne jamais s’en servir pour un diagnostic ni une décision de traitement ; ses valeurs peuvent être en retard ou manquer. Gladys lit, par l’API v2 officielle d’Oura, les dernières données de votre bague Oura, en lecture seule : scores de sommeil, de récupération et d’activité, durées de sommeil, fréquence cardiaque la plus basse et variabilité cardiaque de la nuit, écart de température corporelle, SpO2, pas, calories actives, dernière fréquence cardiaque. Un appareil Gladys (onglet Découverte). La bague envoie ses données quand l’application Oura synchronise. Il faut une application que vous créez vous-même sur le portail développeur d’Oura (OAuth2) : suivez les étapes ci-dessous ou le guide. Votre mot de passe se saisit sur la page d’Oura seulement. Données de santé : pas d’historique par défaut, jamais dans les journaux. Jamais testée avec un vrai compte ou une vraie bague. Intégration non officielle, sans lien avec Oura."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-oura/blob/main/docs/fr.md",
+          "label": { "en": "Guide (French)", "fr": "Guide (français)" }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-oura/blob/main/docs/en.md",
+          "label": { "en": "Guide (English)", "fr": "Guide (anglais)" }
+        },
+        {
+          "url": "https://developer.ouraring.com/",
+          "label": { "en": "Oura developer portal", "fr": "Portail développeur Oura" }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
+      "key": "app_steps",
+      "type": "section",
+      "label": { "en": "1. Your Oura app", "fr": "1. Votre application Oura" },
       "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
-      },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
+        "en": "On the Oura developer portal, sign in with your Oura account and create an application (OAuth). As redirect URI, give the return address of this Gladys: click Connect once below, the status at the top of this page then shows it (copy it exactly, https), or give an address of yours and fill in \"Redirect URI\" below. Save the application, then copy its Client ID and Client Secret below and save.",
+        "fr": "Sur le portail développeur d’Oura, connectez-vous avec votre compte Oura et créez une application (OAuth). Comme URL de redirection (redirect URI), donnez l’adresse de retour de ce Gladys : cliquez une fois sur Connecter plus bas, l’état en haut de cette page l’affiche alors (copiez-la à l’identique, en https), ou donnez une adresse à vous et remplissez « URL de redirection » plus bas. Enregistrez l’application, puis copiez son Client ID et son Client Secret ci-dessous et enregistrez."
+      }
     },
     {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
-      },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
+      "key": "client_id",
+      "type": "string",
       "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
+      "label": { "en": "Client ID", "fr": "Client ID" },
+      "description": {
+        "en": "The Client ID of your Oura app.",
+        "fr": "Le Client ID de votre application Oura."
+      }
     },
     {
-      "key": "unit",
-      "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
+      "key": "client_secret",
+      "type": "secret",
+      "required": true,
+      "label": { "en": "Client Secret", "fr": "Client Secret" },
+      "description": {
+        "en": "The Client Secret of your Oura app. Kept by Gladys in its database, never shown again, sent only to Oura.",
+        "fr": "Le Client Secret de votre application Oura. Gardé par Gladys dans sa base, jamais réaffiché, envoyé seulement à Oura."
+      }
+    },
+    {
+      "key": "sign_in_steps",
+      "type": "section",
+      "label": { "en": "2. Authorize", "fr": "2. Autoriser" },
+      "description": {
+        "en": "Click Connect: the Oura page opens; sign in and allow the access asked (daily data, heart rate, SpO2: nothing else, read only). Oura sends you back to Gladys and the integration reads your data. If the redirect URI of your app is not this Gladys, write it in \"Redirect URI\": at the end, copy the whole address the browser shows (it holds code= and state=) and paste it into \"Finish the authorization\" below, within 15 minutes. The tokens are kept in clear in the /data volume of the integration (readable by its container only), sent only to Oura.",
+        "fr": "Cliquez sur Connecter : la page d’Oura s’ouvre ; connectez-vous et autorisez l’accès demandé (données du jour, fréquence cardiaque, SpO2 : rien d’autre, en lecture seule). Oura vous renvoie vers Gladys et l’intégration lit vos données. Si l’URL de redirection de votre application n’est pas ce Gladys, saisissez-la dans « URL de redirection » : à la fin, copiez l’adresse complète affichée par le navigateur (elle contient code= et state=) et collez-la dans « Terminer l’autorisation » plus bas, dans les 15 minutes. Les jetons sont gardés en clair dans le volume /data de l’intégration (lisible par son conteneur seulement), envoyés seulement à Oura."
+      }
+    },
+    {
+      "key": "redirect_uri",
+      "type": "string",
       "required": false,
-      "default": "celsius",
+      "label": { "en": "Redirect URI (optional)", "fr": "URL de redirection (facultative)" },
+      "description": {
+        "en": "Empty: Oura sends you back to this Gladys. Otherwise the redirect URI of your Oura app (https, or http on localhost only): finish by pasting the address the browser ended on.",
+        "fr": "Vide : Oura vous renvoie vers ce Gladys. Sinon, l’URL de redirection de votre application Oura (https, ou http sur localhost seulement) : terminez en collant l’adresse sur laquelle le navigateur s’est arrêté."
+      },
+      "placeholder": { "en": "https://…", "fr": "https://…" }
+    },
+    {
+      "key": "account",
+      "type": "oauth2",
+      "label": { "en": "Oura account", "fr": "Compte Oura" },
+      "description": {
+        "en": "Opens the Oura authorization page (save the Client ID and Secret first).",
+        "fr": "Ouvre la page d’autorisation d’Oura (enregistrez d’abord le Client ID et le Secret)."
+      }
+    },
+    {
+      "key": "token_endpoint",
+      "type": "select",
+      "required": false,
+      "default": "api",
+      "label": { "en": "Token endpoint", "fr": "Point d’échange des jetons" },
+      "description": {
+        "en": "Leave the documented one. Only if Oura refuses the authorization with a correct Client ID, Secret and redirect URI, choose the other one and click Connect again (a code serves once: they are never tried one after the other).",
+        "fr": "Laissez celui de la documentation. Seulement si Oura refuse l’autorisation avec un Client ID, un Secret et une URL de redirection justes, choisissez l’autre et cliquez de nouveau sur Connecter (un code ne sert qu’une fois : ils ne sont jamais essayés l’un après l’autre)."
+      },
       "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
+        {
+          "value": "api",
+          "label": {
+            "en": "api.ouraring.com (documented)",
+            "fr": "api.ouraring.com (documenté)"
+          }
+        },
+        {
+          "value": "moi",
+          "label": {
+            "en": "moi.ouraring.com (new developer portal)",
+            "fr": "moi.ouraring.com (nouveau portail développeur)"
+          }
+        }
       ]
     },
     {
-      "key": "poll_frequency",
+      "key": "poll_minutes",
       "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
-      "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
-      },
       "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "default": 30,
+      "min": 15,
+      "max": 240,
+      "label": { "en": "Refresh interval (minutes)", "fr": "Intervalle de relecture (minutes)" },
+      "description": {
+        "en": "The ring sends its data when the Oura app syncs: reading more often brings nothing. At most 8 requests per read, 1,000 a day; never sooner than this interval, whatever starts it (test button, saved configuration, Discovery, reconnection of Gladys, restart).",
+        "fr": "La bague envoie ses données quand l’application Oura synchronise : lire plus souvent n’apporte rien. 8 requêtes par lecture au plus, 1 000 par jour ; jamais plus tôt que cet intervalle, quoi qui la lance (bouton de test, configuration enregistrée, Découverte, reconnexion de Gladys, redémarrage)."
+      }
+    },
+    {
+      "key": "language",
+      "type": "select",
+      "required": false,
+      "default": "fr",
+      "label": { "en": "Language of the names", "fr": "Langue des noms" },
+      "options": [
+        { "value": "fr", "label": { "en": "French", "fr": "Français" } },
+        { "value": "en", "label": { "en": "English", "fr": "Anglais" } }
+      ]
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
-      "timeout_seconds": 30
+      "key": "finish_sign_in",
+      "timeout_seconds": 30,
+      "label": { "en": "Finish the authorization", "fr": "Terminer l’autorisation" },
+      "description": {
+        "en": "Only with a redirect URI: paste the address the browser ended on after the Oura page.",
+        "fr": "Seulement avec une URL de redirection : collez l’adresse sur laquelle le navigateur s’est arrêté après la page d’Oura."
+      },
+      "fields": [
+        {
+          "key": "url",
+          "type": "string",
+          "required": true,
+          "label": { "en": "Address with code= and state=", "fr": "Adresse avec code= et state=" },
+          "placeholder": { "en": "https://…?code=…&state=…", "fr": "https://…?code=…&state=…" }
+        }
+      ]
     },
     {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
-    }
-  ],
-  "scene_triggers": [
-    {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
+      "key": "test_connection",
+      "timeout_seconds": 90,
+      "label": { "en": "Test Oura", "fr": "Tester Oura" },
       "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
-      },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
-      "variables": [
-        {
-          "key": "target",
-          "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
-        }
-      ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
+        "en": "Shows the last result and the next read; reads only once the refresh interval has passed since the last read (never during a pause), also after an access refused.",
+        "fr": "Affiche le dernier résultat et la prochaine lecture ; ne lit que si l’intervalle de relecture est écoulé depuis la dernière lecture (jamais pendant une pause), y compris après un accès refusé."
+      }
     }
   ]
 }

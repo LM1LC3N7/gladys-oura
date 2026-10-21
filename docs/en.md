@@ -1,61 +1,135 @@
-# Demo Devices Template
+# Oura
 
-This is the user documentation of the integration. Gladys re-hosts this file
-and shows a permanent **Documentation** link to it in the Configuration screen
-(in the user's language, with English as the fallback) — it is when
-configuring that the user needs it most. Keep the short onboarding hints in
-the `section` blocks of the manifest `config_schema`; put the long
-step-by-step (screenshots, troubleshooting…) here.
+Reads the data of your **Oura ring** in Gladys through the **official Oura API
+v2**, read only: sleep, readiness and activity scores, sleep durations (total,
+deep, REM), lowest heart rate and heart rate variability of the night, body
+temperature deviation, average SpO2 of the night, steps and active calories of
+the day, latest heart rate.
 
-## What you get
+> **Not a medical device.** Never use these values for a diagnosis or a
+> treatment decision. They come from the Oura cloud when the Oura app syncs:
+> they may be late, missing or wrong.
 
-Six demo devices show up after installation: a weather station (real data
-from Open-Meteo), a switch, a dimmable light, a smart plug with power
-metering, a motion sensor and a camera.
+Unofficial integration, not affiliated with Oura. Oura is a trademark of its
+owner. **Never tested with a real device** (ring) nor with a real account: the
+answers of the API were modelled on the Oura documentation, on the oura-ring
+library and on the Home Assistant integration.
 
-## Configuration
+## What you need
 
-1. Open the **Configuration** tab of the integration.
-2. Set the **latitude** and **longitude** the demo weather station should
-   observe (they default to Paris), and pick your temperature unit.
-   The **refresh interval** sets how often the weather station and the
-   plug's power are read: every 5 minutes by default, every minute at most.
-3. Save: the devices appear in the **Discovery** tab, ready to be added.
+- An Oura ring and its Oura account (the Oura API asks for an active Oura
+  membership: without it, it refuses the data, see "Statuses").
+- An **application** you create yourself on the Oura developer portal
+  (OAuth2). Personal access tokens are no longer accepted by Oura.
+- Gladys 5.1 or later.
 
-The **Prefer the local connection** toggle drives the demo plug: it reports
-the channel it actually uses as a badge (local or cloud), with an orange dot
-when it runs degraded (local refused, cloud fallback).
+## Step by step
 
-## Actions
+### 1. Find the return address of Gladys
 
-- **Test the weather provider** — performs a live request to Open-Meteo and
-  shows the current temperature and humidity under the button.
-- **Identify a device** — pick one of your devices in the list and it will
-  signal itself (the demo light "blinks" in the logs).
+1. In Gladys, open the integration, then its **Configuration** tab.
+2. Fill in any text in **Client ID** and **Client Secret** for now, save, then
+   click **Connect** once. The Oura page will refuse (unknown app): close it.
+3. The status at the top of the page now shows **"The return address of this
+   Gladys is https://…"**. Copy this address exactly (scheme, host, port,
+   path).
 
-## Scenes
+If you cannot use this address (for example Gladys is only reachable on your
+local network over http, and the portal asks for https), use an address of
+yours instead and fill it in **Redirect URI** (see step 4).
 
-The integration adds its own cards to the scene editor (Gladys 5.1 or
-later), under the **Integrations** category:
+### 2. Create the Oura application
 
-- **Motion detected** (trigger) — starts the scene when a demo motion sensor
-  sees something move. Optionally pick the sensor and what moved (person,
-  animal); left empty, any detection matches. The following actions can
-  read what moved with `{{triggerEvent.data.target}}`.
-- **Identify a device** (action) — makes the chosen device signal itself.
-  It returns whether the device could signal itself, so the following
-  actions can depend on it.
+1. Open <https://developer.ouraring.com/> and sign in with your Oura account.
+2. Open **My Applications**, then create a new application (the exact names
+   of the buttons and fields were not checked on a real account).
+3. Give it a name (e.g. "Gladys"), a description, your e-mail address and
+   website or privacy policy addresses if the form asks for them.
+4. In **Redirect URIs**, paste the address of step 1 (or yours). It must match
+   exactly.
+5. If the form asks for scopes, allow at least **daily**, **heartrate** and
+   **spo2Daily** (nothing else is needed).
+6. Save. Copy the **Client ID** and the **Client Secret** of the application.
 
-## Dashboard
+### 3. Fill in the configuration
 
-Add the **Demo status** widget to a dashboard: it shows the live
-temperature of the weather station and the power of the office plug, the
-connection the plug currently uses (orange when degraded) and the observed
-location. Its **Identify the light** button makes the demo light signal
-itself.
+1. Paste the **Client ID** and the **Client Secret** in Gladys, then save. The
+   Client Secret is kept by Gladys in its database, never shown again, sent
+   only to Oura.
+2. Leave **Token endpoint** on `api.ouraring.com` (the documented one).
 
-## Troubleshooting
+### 4. Authorize
 
-The integration logs everything it does: check the integration logs from the
-Gladys UI (or `docker logs` on the host) with `LOG_LEVEL=debug` for the full
-detail.
+1. Click **Connect**: the Oura page opens. Sign in and allow the access asked:
+   daily data, heart rate and SpO2, read only (no e-mail, no personal
+   information). Your password is typed on the Oura page only, never in
+   Gladys.
+2. Oura sends you back to Gladys; the integration reads your data.
+3. **With your own redirect URI**: at the end, the browser shows your address
+   with `code=` and `state=`. Copy the whole address and paste it into
+   **Finish the authorization**, within 15 minutes.
+4. Open the **Discovery** tab and add the ring.
+
+If Oura refuses the authorization while the Client ID, the Client Secret and
+the redirect URI are right, choose `moi.ouraring.com` in **Token endpoint**
+(the one of the new developer portal, used by the Home Assistant integration),
+save and click **Connect** again. A code serves once: the two endpoints are
+never tried one after the other.
+
+## The device
+
+One device **Oura ring** (or **Bague Oura**), all features read only, no
+history by default (health data; you may turn the history on per feature):
+
+| Feature                                          | Type in Gladys   | Source                                        |
+| ------------------------------------------------ | ---------------- | --------------------------------------------- |
+| Sleep score                                      | number 0-100     | latest `daily_sleep`                          |
+| Readiness score                                  | number 0-100     | latest `daily_readiness`                      |
+| Activity score                                   | number 0-100     | latest `daily_activity`                       |
+| Sleep duration, deep sleep, REM sleep            | duration (hours) | main sleep of the latest night (`sleep`)      |
+| Lowest heart rate during sleep (bpm)             | number           | same                                          |
+| Average heart rate variability during sleep (ms) | number           | same                                          |
+| Body temperature deviation (°C)                  | number           | latest `daily_readiness`                      |
+| Average blood oxygen during sleep (SpO2, %)      | number           | latest `daily_spo2`                           |
+| Steps of the day, active calories (kcal)         | number           | latest `daily_activity`                       |
+| Latest heart rate (bpm)                          | number           | latest `heartrate` sample of the last 3 hours |
+
+Gladys has no unit for a heart rate, a score or a blood oxygen: the unit is in
+the name. Only data of yesterday or today counts as current: an older day (the
+ring did not sync) and a heart rate older than 3 hours are never published.
+
+## Requests and limits
+
+- One read every **30 minutes** by default (15 to 240): 6 to 8 requests per
+  read, at most 1,000 a day (Oura allows far more). The ring sends its data
+  when the Oura app syncs: reading more often brings nothing.
+- Never sooner than the interval, whatever starts it: the **Test Oura**
+  button, a saved configuration, Discovery, a reconnection of Gladys, a
+  restart of the container (the time of the last read is kept in `/data`).
+- A 429 (too many requests), a server error (5xx) or the daily budget pause
+  every request, kept in `/data` across a restart.
+- The token is renewed by a timer before its end, one renewal at a time,
+  never twice within a minute. Oura's renewal tokens serve once: the new one
+  is saved at once.
+
+## Statuses
+
+- **Not signed in**: click Connect. The integration never signs in by itself.
+- **Session ended (renewal refused)**: kept across a restart, never retried by
+  itself; click Connect to authorize again.
+- **Access refused even with a new token**: kept across a restart; click
+  Connect, or **Test Oura** once (after the interval).
+- **Oura refused the data (403)**: the API needs an active Oura membership;
+  read again after 6 hours.
+- **Not read this time: SpO2…**: one collection was refused (scope not
+  granted, ring without that feature) or failed; the others are published.
+
+## Privacy
+
+- Read only: the integration never writes to Oura.
+- The health values stay in memory and go to Gladys only: never in the logs,
+  never in a status message, never in `/data`.
+- The tokens are kept in clear in the `/data` volume of the integration
+  (readable by its container only), sent only to Oura.
+- Revoke the access at any time in your Oura account (authorized apps) or by
+  deleting the application on the developer portal.

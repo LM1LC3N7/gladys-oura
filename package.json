@@ -1,8 +1,8 @@
 {
-  "name": "gladys-integration-template-js",
-  "version": "1.0.0",
+  "name": "gladys-oura",
+  "version": "0.1.0",
   "private": true,
-  "description": "Official starter template to build an external integration for Gladys Assistant with the JavaScript SDK.",
+  "description": "Oura ring for Gladys Assistant through the official Oura API v2 (OAuth2), read only: sleep, readiness and activity scores, sleep durations, heart rate, SpO2. Not a medical device.",
   "type": "module",
   "main": "index.js",
   "scripts": {
@@ -10,10 +10,16 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node --test"
+    "test": "node --test",
+    "audit": "npm audit --omit=dev",
+    "cover": "node scripts/cover.mjs"
   },
   "engines": {
     "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LM1LC3N7/gladys-oura.git"
   },
   "dependencies": {
     "@gladysassistant/integration-sdk": "^0.15.0"
