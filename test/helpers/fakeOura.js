@@ -8,12 +8,25 @@
 import { API_BASE, TOKEN_URLS } from '../../src/constants.js';
 import { CLIENT_ID, CLIENT_SECRET, collections } from '../fixtures/oura.js';
 
+/** The scopes of the OpenAPI specification 1.41: any other name is refused (invalid_scope). */
+export const KNOWN_SCOPES = new Set([
+  'email',
+  'personal',
+  'daily',
+  'heartrate',
+  'workout',
+  'tag',
+  'session',
+  'spo2',
+  'heart_health',
+]);
+
 const COLLECTION_SCOPES = {
   daily_sleep: 'daily',
   daily_readiness: 'daily',
   daily_activity: 'daily',
   sleep: 'daily',
-  daily_spo2: 'spo2Daily',
+  daily_spo2: 'spo2',
   heartrate: 'heartrate',
 };
 
@@ -68,6 +81,11 @@ export function fakeOura({ expiresIn = 86400, now = () => Date.now() } = {}) {
     /** The user authorizes on the Oura page of `authorizeUrl`: the code and state of the return. */
     approve(authorizeUrl) {
       const url = new URL(authorizeUrl);
+      const asked = (url.searchParams.get('scope') ?? '').split(' ');
+      if (asked.some((s) => !KNOWN_SCOPES.has(s))) {
+        // Oura sends the browser back with an error, no code.
+        return { error: 'invalid_scope', state: url.searchParams.get('state'), url };
+      }
       const code = `code-${this.codes.size + 1}-${this.issued}`;
       this.codes.set(code, {
         redirectUri: url.searchParams.get('redirect_uri'),

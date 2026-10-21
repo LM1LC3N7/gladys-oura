@@ -22,6 +22,8 @@ export function queryOf(name, now, window) {
     return {
       start_datetime: new Date(now - window).toISOString().replace(/\.\d{3}Z$/, 'Z'),
       end_datetime: new Date(now).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      // Only what is read (as the Home Assistant integration): smaller pages.
+      fields: 'timestamp,bpm',
     };
   }
   return { start_date: isoDay(now - 2 * DAY), end_date: isoDay(now + DAY) };

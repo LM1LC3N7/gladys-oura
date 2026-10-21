@@ -27,6 +27,13 @@ up to date at the end of every milestone.
       validator cannot run from the development sandbox: it runs at
       publication. No Docker on this PC: the image was not built here (the CI
       builds it).
+- [x] **Fixes of review 1** (2026-10-21): each record published once (no
+      heartbeat, `created_at` of the heart rate sample, nothing after a
+      failure), scope `spo2`, `moi` token endpoint by default and kept in the
+      session, a renewal answer kept unless the session was replaced, no
+      device before an authorization, an exact message after a sign-in, the
+      OAuth ack without waiting for Discovery, heart rate pages kept, badge at
+      a restart, 403 text, docs.
 - [ ] **Milestone 2 — real account**: run against a real account and ring
       (see "To check on a real account"), turn the answers (anonymized) into
       fixtures, fix what differs.
@@ -49,11 +56,19 @@ up to date at the end of every milestone.
   creates the app (no shared client secret in the image). Same model as
   gladys-sungrow: Connect with Gladys' return, or a redirect URI of the user
   and a pasted address; state of 128 random bits, 15 minutes, one use.
-- **Token endpoint chosen by the user**, `api.ouraring.com/oauth/token` by
-  default (Oura docs, oura-ring); `moi.ouraring.com/oauth/v2/ext/oauth-token`
-  as an option (the Home Assistant integration says the new portal apps need
-  it). Never both one after the other: a code serves once (HA issue #75).
-- **Scopes `daily heartrate spo2Daily`** only: no `email`, no `personal`
+- **Token endpoint chosen by the user, `moi` by default** (review 1). The
+  Home Assistant integration (const.py lines 29-33, application_credentials.py,
+  release notes, issue #75) says `moi.ouraring.com/oauth/v2/ext/oauth-token` is
+  the live endpoint for the apps of the legacy and of the current portal, and
+  `api.ouraring.com/oauth/token` is kept only for the few legacy apps `moi`
+  refuses; `api` refuses the codes of current apps and the refusal consumes
+  the code. `api` stays as an option: the OpenAPI specification 1.41 and
+  oura-ring still name it. Never both one after the other. A session keeps the
+  endpoint that issued it (in `/data`) and is renewed there; a new choice
+  applies at the next Connect.
+- **Scopes `daily heartrate spo2`** only (names of the OpenAPI specification
+  1.41; `spo2Daily` was the name up to 1.37, the HA integration moved to
+  `spo2`): no `email`, no `personal`
   (age, weight, sex). So no Oura account id is read: the device id is a hash
   of the client id (one Oura account per app).
 - **Primary / secondary collections**: `daily_sleep` decides the cycle (a 401
@@ -73,6 +88,20 @@ up to date at the end of every milestone.
   `unknown` sensors, the unit in the name; the deviation of body temperature
   is never a `temperature-sensor` (room temperature scenes). Durations are
   `duration` in hours. `keep_history: false` for all (health data).
+- **Each record published once** (review 1): a reading carries a key (value@day,
+  bpm@timestamp, as gladys-dexcom) and an end of currency (two days after its
+  day, 3 hours after a heart rate sample); no heartbeat, nothing queued after
+  a failed read, `publishStates` with `created_at` = the sample time for the
+  heart rate; a device created again gets only the readings still current.
+  A heart rate older than the last one sent is never sent.
+- **Heart rate pages**: oldest first, three at most, `fields=timestamp,bpm`;
+  a failing page keeps those already read (the sample keeps its own time).
+- **The OAuth return is acked once the session is in `/data`**; Discovery,
+  status and the read follow without being waited for (Gladys cuts at 5 s).
+  "Test Oura" has 120 s: 9 requests of 8 s at most.
+- **A renewal answer is dropped only when the session was replaced** (a new
+  authorization, another client); a restart waits for a renewal in flight,
+  and the file store reads after the pending writes (review 1).
 - **No health value in `/data`**: after a restart, nothing is published until
   the next read (the status still says connected when the last read
   succeeded).
@@ -87,9 +116,9 @@ up to date at the end of every milestone.
 - The developer portal: the names of the pages and fields, whether it asks
   for scopes, whether a redirect URI must be https (and whether
   `http://localhost` is accepted), whether several redirect URIs are allowed.
-- The authorization: that the scope `spo2Daily` is accepted (oura-ring: spec
-  name; the HA integration asks `spo2`); that `state` comes back; the token
-  endpoint that works for a new app (`api` or `moi`); the token answer
+- The authorization: that the scope `spo2` is accepted; that `state` comes
+  back; that `moi` works for a new app (and whether `moi` renews a session
+  issued by `api`); the token answer
   (`expires_in`, a new `refresh_token` at each renewal).
 - The answers: the fields read (`score`, `temperature_deviation`, `steps`,
   `active_calories`, `total_sleep_duration`, `deep_sleep_duration`,

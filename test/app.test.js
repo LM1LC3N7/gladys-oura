@@ -139,7 +139,7 @@ test('signed out: never a request by itself; Connect builds the Oura address wit
   assert.equal(url.searchParams.get('response_type'), 'code');
   assert.equal(url.searchParams.get('client_id'), CLIENT_ID);
   assert.equal(url.searchParams.get('redirect_uri'), GLADYS_REDIRECT);
-  assert.equal(url.searchParams.get('scope'), 'daily heartrate spo2Daily');
+  assert.equal(url.searchParams.get('scope'), 'daily heartrate spo2');
   assert.ok(url.searchParams.get('state').length >= 16);
   assert.ok(
     !ack.data.authorize_url.includes(CLIENT_SECRET),
@@ -160,7 +160,7 @@ test('authorization, then one read: device, states, status, tokens in /data, no 
   const logs = [];
   const { gladys, store, server } = await setup(t, { logs });
   const [exchange] = server.of('token');
-  assert.equal(exchange.endpoint, TOKEN_URLS.api);
+  assert.equal(exchange.endpoint, TOKEN_URLS.moi, 'the live endpoint by default');
   assert.equal(exchange.method, 'POST');
   assert.equal(exchange.headers['Content-Type'], 'application/x-www-form-urlencoded');
   assert.equal(exchange.form.grant_type, 'authorization_code');
@@ -254,10 +254,10 @@ test('a refused code tells the user, nothing is retried', async (t) => {
 });
 
 test('the other token endpoint is used when chosen, never both', async (t) => {
-  const { server } = await setup(t, { config: { ...CONFIG, token_endpoint: 'moi' } });
+  const { server } = await setup(t, { config: { ...CONFIG, token_endpoint: 'api' } });
   assert.deepEqual(
     server.of('token').map((r) => r.endpoint),
-    [TOKEN_URLS.moi],
+    [TOKEN_URLS.api],
   );
 });
 
@@ -293,7 +293,7 @@ test('another redirect URI: the pasted address finishes the authorization', asyn
   await settle();
   const [exchange] = server.of('token');
   assert.equal(exchange.form.redirect_uri, redirect);
-  assert.equal(exchange.timeout, 10 * SECOND);
+  assert.equal(exchange.timeout, 8 * SECOND);
   assert.equal(gladys.fake.connectionStatus.connected, true);
   ack = await gladys.fake.action(ACTIONS.FINISH_SIGN_IN, {
     url: `${redirect}?code=${back.code}&state=${back.state}`,
@@ -663,20 +663,22 @@ test('a read in flight when the configuration changes: its late answer publishes
   );
 });
 
-test('new keys saved while a renewal is in flight: its answer is dropped', async (t) => {
+test('new keys saved while a renewal is in flight: the restart waits for it, the old session keeps its new token', async (t) => {
   const server = fakeOura({ expiresIn: 1800 });
   const { gladys, store, advance } = await setup(t, { server });
   let release;
   server.queue('token', () => new Promise((resolve) => (release = resolve)));
   await advance(21 * MINUTE, MINUTE);
   assert.ok(release, 'renewal in flight');
-  await gladys.fake.configUpdated({ ...CONFIG, client_id: 'OTHERCLIENT' });
+  const saving = gladys.fake.configUpdated({ ...CONFIG, client_id: 'OTHERCLIENT' });
   await settle();
   release(answer(200, { access_token: 'OLD', refresh_token: 'OLD-R', expires_in: 3600 }));
+  await saving;
   await settle();
-  assert.notEqual(store.data.session?.accessToken, 'OLD');
+  assert.match(message(gladys).en, /Not signed in/, 'the new app is not signed in');
+  assert.equal(store.data.session.client, CLIENT, 'the renewed session is the old app’s');
+  assert.equal(store.data.session.refreshToken, 'OLD-R');
 });
-
 test('the device never loses a feature; a new language renames only what Gladys does not hold', async (t) => {
   const { gladys } = await setup(t);
   const before = gladys.fake.discoveredDevices[0].features.map((f) => f.external_id).sort();
@@ -685,4 +687,214 @@ test('the device never loses a feature; a new language renames only what Gladys 
   const after = gladys.fake.discoveredDevices[0];
   assert.deepEqual(after.features.map((f) => f.external_id).sort(), before);
   assert.equal(after.name, 'Oura ring');
+});
+
+// --- Review 1 (scenarios H1 to H7 of the review, and the minor points) ----------
+
+const HR = feature('heart_rate');
+const hrStates = (gladys) => gladys.fake.states.filter((s) => s.device_feature_external_id === HR);
+
+test('I1/H1: Oura down for 8 hours: nothing is published again, the heart rate carries its own time', async (t) => {
+  const { gladys, server, advance } = await setup(t);
+  const [first] = hrStates(gladys);
+  assert.equal(first.state, VALUES.heartRate);
+  assert.equal(first.created_at, new Date(NOW - 10 * MINUTE).toISOString());
+  const before = gladys.fake.states.length;
+  server.queue('daily_sleep', answer(503, {}), 200);
+  await advance(8 * HOUR, MINUTE);
+  assert.equal(gladys.fake.states.length, before, 'no state while Oura is down');
+});
+
+test('I1/H1b: membership lapsed (403 for a day): the old values are never re-dated', async (t) => {
+  const { gladys, server, advance } = await setup(t);
+  const before = gladys.fake.states.length;
+  server.queue('daily_sleep', answer(403, {}), 200);
+  await advance(26 * HOUR, 10 * MINUTE);
+  assert.equal(gladys.fake.states.length, before);
+});
+
+test('I1/H1c: the ring does not sync: the same records are published once', async (t) => {
+  const server = fakeOura();
+  server.data = collections(NOW);
+  const { gladys, advance } = await setup(t, { server });
+  const before = gladys.fake.states.length;
+  await advance(2 * HOUR + 40 * MINUTE, MINUTE);
+  assert.equal(hrStates(gladys).length, 1);
+  assert.equal(gladys.fake.states.length, before, 'same day, same values: nothing again');
+  // A new value of the same day goes; the heart rate past 3 hours never again.
+  server.data = { ...collections(NOW), daily_activity: [{ day: '2026-10-21', steps: 9000 }] };
+  await advance(30 * MINUTE, MINUTE);
+  assert.equal(last(gladys, 'steps'), 9000);
+  assert.equal(hrStates(gladys).length, 1);
+});
+
+test('I1: a device created again after the window gets no stale heart rate', async (t) => {
+  const { gladys, server, advance } = await setup(t);
+  server.queue('daily_sleep', answer(503, {}), 200);
+  await advance(4 * HOUR, 10 * MINUTE);
+  const before = hrStates(gladys).length;
+  await gladys.fake.deviceCreated(gladys.fake.discoveredDevices[0]);
+  await advance(5 * SECOND, SECOND);
+  assert.equal(hrStates(gladys).length, before, 'the sample is older than 3 hours');
+});
+
+test('I2/H3: the SpO2 scope is spo2 (OpenAPI 1.41); an unknown scope name is refused by Oura', async (t) => {
+  const { gladys, server } = await setup(t, { signIn: false });
+  const ack = await gladys.fake.oauthAuthorizeUrl(OAUTH_FIELD, GLADYS_REDIRECT);
+  const url = new URL(ack.data.authorize_url);
+  assert.deepEqual(url.searchParams.get('scope').split(' '), ['daily', 'heartrate', 'spo2']);
+  url.searchParams.set('scope', 'daily spo2Daily');
+  assert.equal(server.approve(url.toString()).error, 'invalid_scope');
+});
+
+test('I4/H2: another secret saved during a renewal: the new renewal token is kept, no stop', async (t) => {
+  const server = fakeOura({ expiresIn: 1800 });
+  const store = memoryStore();
+  const { gladys, app, advance } = await setup(t, { server, store });
+  let release;
+  server.queue(
+    'token',
+    (req) =>
+      new Promise((resolve) => {
+        release = () => {
+          server.used.add(req.form.refresh_token);
+          resolve(server.issue());
+        };
+      }),
+  );
+  await advance(20 * MINUTE + 30 * SECOND, 10 * SECOND);
+  assert.ok(release, 'renewal in flight');
+  const saving = gladys.fake.configUpdated({ ...CONFIG, client_secret: 'other-secret-value' });
+  await settle();
+  release();
+  await saving;
+  await settle();
+  assert.equal(store.data.session.refreshToken, server.refresh, 'kept at once');
+  await gladys.fake.configUpdated({ ...CONFIG });
+  await settle();
+  server.expiresIn = 1800;
+  await advance(40 * MINUTE, MINUTE);
+  const renewals = server.of('token').filter((r) => r.form.grant_type === 'refresh_token');
+  assert.ok(
+    renewals.every(
+      (r, i, all) => all.findIndex((o) => o.form.refresh_token === r.form.refresh_token) === i,
+    ),
+    'never a token sent twice',
+  );
+  assert.equal(store.data.block, null);
+  assert.equal(app.blocked, undefined);
+});
+
+test('I4: the file store reads only after the writes asked before', async () => {
+  const { fileStore } = await import('../src/store.js');
+  const { mkdir, rm } = await import('node:fs/promises');
+  const dir = new URL('./.tmp-store/', import.meta.url);
+  await mkdir(dir, { recursive: true });
+  try {
+    const { fileURLToPath } = await import('node:url');
+    const store = fileStore(fileURLToPath(new URL('state.json', dir)));
+    store.save({ n: 1 });
+    store.save({ n: 2 });
+    assert.deepEqual(await store.load(), { n: 2 });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('M1/H5: no device in Discovery before an authorization', async (t) => {
+  const { gladys, app } = await setup(t, {
+    config: { client_id: 'anything', client_secret: 'anything' },
+    signIn: false,
+  });
+  await app.scan();
+  assert.equal(gladys.fake.discoveredDevices.length, 0);
+});
+
+test('M2/H6: Connect after "session ended": the ack says when the read comes, as the status does', async (t) => {
+  const server = fakeOura({ expiresIn: 1800 });
+  const { gladys, advance, connect } = await setup(t, { server });
+  server.refresh = 'rotated-elsewhere';
+  await advance(21 * MINUTE, MINUTE);
+  const reads = server.apiRequests.length;
+  const back = await connect();
+  const url = new URL(`${GLADYS_REDIRECT}?code=${back.code}&state=${back.state}`);
+  const ack = await gladys.fake.action(ACTIONS.FINISH_SIGN_IN, { url: url.toString() });
+  await settle();
+  assert.match(ack.data.message.en, /Authorized by Oura; next read in 9 min/);
+  assert.match(message(gladys).en, /Authorized by Oura; next read in 9 min/);
+  assert.equal(server.apiRequests.length, reads);
+  await advance(10 * MINUTE, MINUTE);
+  assert.ok(server.apiRequests.length > reads);
+  assert.equal(gladys.fake.connectionStatus.connected, true);
+});
+
+test('M3/H7: another token endpoint chosen with a live session: renewed where it was issued', async (t) => {
+  const server = fakeOura({ expiresIn: 1800 });
+  const store = memoryStore();
+  const { gladys, advance } = await setup(t, { server, store });
+  await gladys.fake.configUpdated({ ...CONFIG, token_endpoint: 'api' });
+  await settle();
+  await advance(21 * MINUTE, MINUTE);
+  const renewal = server.of('token').at(-1);
+  assert.equal(renewal.form.grant_type, 'refresh_token');
+  assert.equal(renewal.endpoint, TOKEN_URLS.moi);
+  assert.equal(store.data.session.endpoint, 'moi');
+  assert.equal(store.data.block, null);
+});
+
+test('M4: the OAuth return is acked once the session is saved, without waiting for Discovery', async (t) => {
+  const { gladys, server, connect } = await setup(t, { signIn: false });
+  gladys.publishDiscoveredDevices = () => new Promise(() => {});
+  const back = await connect();
+  const ack = await gladys.fake.oauthCallback(OAUTH_FIELD, back);
+  assert.equal(ack.success, true);
+  assert.equal(server.of('token').length, 1);
+});
+
+test('M5: a 403 on the daily data also points to Connect (daily data not allowed)', async (t) => {
+  const { gladys, server, advance } = await setup(t);
+  server.queue('daily_sleep', answer(403, {}));
+  await advance(30 * MINUTE, MINUTE);
+  assert.match(message(gladys).en, /not allowed: then click Connect/);
+});
+
+test('M6: a renewal failing after a restart never sets a status of the old configuration', async (t) => {
+  const server = fakeOura({ expiresIn: 1800 });
+  const { gladys, advance } = await setup(t, { server });
+  let release;
+  server.queue('token', () => new Promise((resolve) => (release = resolve)));
+  await advance(21 * MINUTE, MINUTE);
+  const saving = gladys.fake.configUpdated({ ...CONFIG, client_id: 'OTHERCLIENT' });
+  await settle();
+  release(answer(429, {}, { 'retry-after': '600' }));
+  await saving;
+  await settle();
+  assert.match(message(gladys).en, /Not signed in/);
+});
+
+test('M7: heart rate pages: a failing second page keeps the first, only timestamp and bpm asked', async (t) => {
+  const server = fakeOura();
+  server.queue(
+    'heartrate',
+    answer(200, {
+      data: [{ bpm: 66, timestamp: new Date(NOW - 20 * MINUTE).toISOString() }],
+      next_token: 'p2',
+    }),
+  );
+  server.queue('heartrate', answer(503, {}));
+  const { gladys } = await setup(t, { server });
+  assert.equal(server.of('heartrate')[0].query.fields, 'timestamp,bpm');
+  assert.equal(last(gladys, 'heart_rate'), 66);
+  assert.equal(hrStates(gladys)[0].created_at, new Date(NOW - 20 * MINUTE).toISOString());
+});
+
+test('M8: a restart that stays connected publishes the badge at once', async (t) => {
+  const store = memoryStore();
+  const server = fakeOura();
+  const first = await setup(t, { server, store });
+  const devices = first.gladys.devices;
+  first.app.stop();
+  const { gladys } = await setup(t, { server, store, mock: false, create: false, devices });
+  assert.equal(gladys.fake.connectionStatus.connected, true);
+  assert.equal(gladys.fake.transports.at(-1)?.transport, DEVICE_TRANSPORTS.CLOUD);
 });

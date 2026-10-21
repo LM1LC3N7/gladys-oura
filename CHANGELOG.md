@@ -22,14 +22,17 @@ the notes of the version's GitHub Release.
   address; a state that serves once; the token renewed by a timer, one
   renewal at a time, never twice within a minute; a refused renewal or an
   access refused with a new token is a stop kept in `/data`, never retried by
-  itself. Choice of the token endpoint (documented, or the one of the new
-  developer portal).
+  itself. Choice of the token endpoint (`moi.ouraring.com` by default, the
+  live one; `api.ouraring.com` for old apps), kept by the session it issued.
+  Scopes `daily heartrate spo2`.
 - Rate limits: 15 minutes at least between reads (30 by default), whatever
   starts them, restarts included; 429, 5xx, 403 (membership) and a daily
   budget of 1,000 requests pause the reads, kept in `/data`. A secondary
   collection refused or failing never stops the others.
 - Only recent data is published (yesterday or today; a heart rate of the last
-  3 hours). Health values never in the logs, the statuses nor `/data`.
+  3 hours), each record once (no heartbeat, nothing sent again after a failed
+  read), the heart rate with the time of its sample. Health values never in
+  the logs, the statuses nor `/data`.
 - Docs in English and French with the Oura app step by step, cover image.
 
 [Unreleased]: https://github.com/LM1LC3N7/gladys-oura/commits/main

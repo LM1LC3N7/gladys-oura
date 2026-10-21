@@ -115,6 +115,8 @@ export class OuraApp {
     this.lastTestAt = -Infinity;
     /** The device published in this run, by external id: a publication never shrinks. */
     this.known = new Map();
+    /** The time of the heart rate sample last queued: never an older one after it. */
+    this.lastHeartAt = -Infinity;
     this.reset();
   }
 
@@ -122,6 +124,8 @@ export class OuraApp {
   reset() {
     /** The values of the last read (in memory only), and its day of sleep data. */
     this.values = null;
+    /** The readings of the last read (src/model.js): value, key, until, created_at. */
+    this.readings = null;
     this.day = null;
     /** The collections not read at the last cycle. */
     this.missing = [];
@@ -147,15 +151,19 @@ export class OuraApp {
 
   async start(raw = {}) {
     this.stop();
-    // A renewal or an exchange still in flight belongs to the previous keys: dropped.
+    // An exchange still in flight belongs to the previous keys: dropped.
     this.epoch += 1;
     await this.running;
+    // A renewal in flight ends first: its new renewal token (they serve once) is
+    // kept in /data before /data is read again.
+    await this.renewing?.catch(() => {});
     const previous = this.config.client;
     this.config = normalizeConfig(raw);
     if (previous && previous !== this.config.client) {
       // Another app: its device and its values are not this one's.
       this.known = new Map();
       this.publisher.clear();
+      this.lastHeartAt = -Infinity;
     }
     this.reset();
     this.signIns.clear();
@@ -202,6 +210,7 @@ export class OuraApp {
       ) {
         this.connectedOnce = true;
         await this.setStatus(true, join(T.connected, T.nextRead(age(due - this.now()))));
+        await this.publishBadges();
         this.scheduleAt(due);
         return;
       }
@@ -240,10 +249,10 @@ export class OuraApp {
     return s && s.client === this.config.client ? s : null;
   }
 
-  /** The keys of a token request. */
-  tokenOptions(timeout) {
+  /** The keys of a token request; `endpoint`: the one of the session for a renewal. */
+  tokenOptions(timeout, endpoint = this.config.tokenEndpoint) {
     return {
-      endpoint: this.config.tokenEndpoint,
+      endpoint,
       clientId: this.config.clientId,
       clientSecret: this.config.clientSecret,
       now: this.now(),
@@ -297,8 +306,6 @@ export class OuraApp {
       this.published = undefined;
       this.known = new Map();
       await this.publishDevices();
-      this.queueStates();
-      await this.flush();
     }
     return undefined;
   }
@@ -465,6 +472,10 @@ export class OuraApp {
     this.logger.info(`Oura: token renewal failed (${errorReason(err)})`);
     if (PAUSING.has(err.kind)) {
       await this.pause(err);
+      if (generation !== this.generation) {
+        // Restarted meanwhile: the new configuration sets its own status.
+        return;
+      }
       await this.setStatus(this.connectedOnce && err.kind !== 'unavailable', this.pauseMessage());
     } else if (err.kind === 'renew_wait' || err.kind === 'paused') {
       // A renewal ran less than a minute ago, or a pause runs: the timer comes back after it.
@@ -504,16 +515,24 @@ export class OuraApp {
     // Kept before the request: a restart during it never renews within a minute.
     this.memory.lastRenewAt = now;
     await this.saveMemory();
+    // Only a new session (a new authorization, another client) makes the answer
+    // useless; a restart on the same session (another secret saved) keeps it:
+    // the renewal token sent is consumed by Oura, the new one must be kept.
+    const replaced = () => {
+      const current = this.memory.session;
+      return !current || current.client !== s.client || current.refreshToken !== s.refreshToken;
+    };
     let token;
     try {
       token = await tokenRequest(
         this.transport,
         { grant_type: 'refresh_token', refresh_token: s.refreshToken },
-        this.tokenOptions(timeout),
+        // Renewed at the endpoint that issued the session.
+        this.tokenOptions(timeout, s.endpoint ?? this.config.tokenEndpoint),
       );
     } catch (err) {
-      if (epoch !== this.epoch) {
-        // A sign-in or a restart happened meanwhile: this failure belongs to the old session.
+      if (replaced()) {
+        // A sign-in happened meanwhile: this failure belongs to the old session.
         throw new OuraError('renew_wait', 'a new sign-in replaced the session');
       }
       if (err.kind === 'refused') {
@@ -528,20 +547,23 @@ export class OuraApp {
       }
       throw err;
     }
-    if (epoch !== this.epoch) {
+    if (replaced()) {
       return;
     }
     // Oura's renewal tokens serve once: the new one is kept at once.
     this.memory.session = {
-      client: this.config.client,
+      client: s.client,
       ...token,
       refreshToken: token.refreshToken ?? s.refreshToken,
+      endpoint: s.endpoint ?? this.config.tokenEndpoint,
     };
     this.renewFailures = 0;
     this.renewRetryAt = 0;
     this.renewError = undefined;
     await this.saveMemory();
-    this.scheduleRenew();
+    if (epoch === this.epoch) {
+      this.scheduleRenew();
+    }
   }
 
   /** A usable access token: renewed first when it ended (and a renewal is allowed). */
@@ -672,17 +694,20 @@ export class OuraApp {
     if (generation !== this.generation) {
       return;
     }
+    let fresh = false;
     try {
       const read = await this.readAll(timeout, generation);
       if (generation !== this.generation || read === null) {
         return;
       }
       this.values = read.values;
+      this.readings = read.readings;
       this.day = read.day;
       this.missing = read.missing;
       // A stop raised meanwhile (a refused renewal by the timer) is never covered.
       if (!this.blocked) {
         await this.succeeded();
+        fresh = !this.blocked;
       }
     } catch (err) {
       if (generation !== this.generation || err.kind === 'stale') {
@@ -695,7 +720,10 @@ export class OuraApp {
     }
     await this.saveMemory();
     await this.publishDevices();
-    this.queueStates();
+    if (fresh) {
+      // Only the values of this read: after a failure, nothing is sent again.
+      this.queueStates();
+    }
     await this.flush();
     await this.publishBadges();
     this.scheduleNext();
@@ -748,21 +776,35 @@ export class OuraApp {
         return null;
       }
     }
-    const { day, values } = valuesOf(answers, this.now());
-    return { day, values, missing };
+    const { day, values, readings } = valuesOf(answers, this.now());
+    return { day, values, readings, missing };
   }
 
-  /** The heart rate of the last hours: the pages of the answer, LIMITS.heartRatePages at most. */
+  /**
+   * The heart rate of the last hours: the pages of the answer (oldest first),
+   * LIMITS.heartRatePages at most. A page that fails after the first keeps
+   * the pages already read: the most recent good sample among them is used,
+   * published with its own time (created_at), so it is never a wrong "now".
+   */
   async readHeartRate(timeout, generation) {
     const pages = [];
     let query = queryOf('heartrate', this.now(), TIMINGS.heartRateWindow);
     for (let i = 0; i < LIMITS.heartRatePages; i += 1) {
-      const page = await this.call(
-        (token) =>
-          getCollection(this.transport, 'heartrate', query, { token, now: this.now(), timeout }),
-        timeout,
-        { secondary: true },
-      );
+      let page;
+      try {
+        page = await this.call(
+          (token) =>
+            getCollection(this.transport, 'heartrate', query, { token, now: this.now(), timeout }),
+          timeout,
+          { secondary: true },
+        );
+      } catch (err) {
+        if (pages.length === 0 || CRITICAL.has(err.kind) || generation !== this.generation) {
+          throw err;
+        }
+        this.logger.info(`Oura: heartrate page ${i + 1} not read (${errorReason(err)})`);
+        break;
+      }
       if (generation !== this.generation) {
         throw new OuraError('stale', 'stale');
       }
@@ -880,7 +922,9 @@ export class OuraApp {
    */
   async publishDevices() {
     const { client } = this.config;
-    if (!client) {
+    // Only an app that was authorized (a session or a stop of this client):
+    // never a device for a Client ID typed before the app exists.
+    if (!client || !(this.session || this.memory.block?.client === client)) {
       return;
     }
     const fresh = buildDevice(this.gladys, client, this.config.language);
@@ -917,15 +961,30 @@ export class OuraApp {
     }
   }
 
-  /** The states of the last read, for the created features only. */
+  /**
+   * The readings of the last read, for the created features only: each one
+   * once (its key), never past its `until` (checked again by the publisher),
+   * never a heart rate older than the one already sent.
+   */
   queueStates(created = this.createdFeatures()) {
-    if (!this.values || !this.config.client) {
+    if (!this.readings || !this.config.client) {
       return;
     }
-    for (const [featureId, value] of deviceStates(this.gladys, this.config.client, this.values)) {
-      if (created.has(featureId)) {
-        this.publisher.push(featureId, { state: value });
+    for (const [featureId, reading] of deviceStates(
+      this.gladys,
+      this.config.client,
+      this.readings,
+    )) {
+      if (!created.has(featureId)) {
+        continue;
       }
+      if (reading.at !== undefined) {
+        if (reading.at < this.lastHeartAt) {
+          continue;
+        }
+        this.lastHeartAt = reading.at;
+      }
+      this.publisher.push(featureId, reading);
     }
   }
 
@@ -951,11 +1010,21 @@ export class OuraApp {
     }
   }
 
-  /** A device created or updated: the values of the last read right away. */
+  /**
+   * A device created or updated (Gladys forgets what it was sent): the
+   * readings of the last read that are still current, right away, each with
+   * its own key and time.
+   */
   async deviceCreated(device) {
+    if (device?.external_id) {
+      // A new device holds no state: what was sent to a deleted one goes again.
+      this.publisher.forget(device.external_id);
+      this.lastHeartAt = -Infinity;
+    }
     await this.deviceUpdated(device);
   }
 
+  /** Updated: the features it gained get the current readings (the others were sent). */
   async deviceUpdated(device) {
     if (device?.external_id) {
       this.badges.delete(device.external_id);
@@ -1019,8 +1088,8 @@ export class OuraApp {
     }
     // Gladys waits for this answer: the exchange must end well before its timeout.
     const result = await this.exchange(code, signIn, { timeout: TIMINGS.callbackTimeout });
-    if (result !== T.signIn.done) {
-      throw thrown(result);
+    if (!result.ok) {
+      throw thrown(result.message);
     }
   }
 
@@ -1050,21 +1119,32 @@ export class OuraApp {
     if (!signIn) {
       return T.signIn.unknown;
     }
-    return this.exchange(parsed.code, signIn, { timeout: TIMINGS.quickTimeout, pasted: true });
+    const result = await this.exchange(parsed.code, signIn, {
+      timeout: TIMINGS.quickTimeout,
+      pasted: true,
+    });
+    return result.message;
   }
 
-  /** The code -> a new session, kept in /data; then one read. */
+  /**
+   * The code -> a new session, kept in /data; then one read. `{ ok, message }`:
+   * the answer is given once the session is in /data; the Discovery list, the
+   * status and the read follow without being waited for (Gladys acks the
+   * OAuth return within 5 s).
+   */
   async exchange(code, signIn, { timeout = TIMINGS.quickTimeout, pasted = false } = {}) {
+    const fail = (message) => ({ ok: false, message });
     if (!this.config.client || !this.config.clientSecret) {
-      return T.noClient;
+      return fail(T.noClient);
     }
     if (this.hardPaused) {
       this.signIns.restore(signIn);
-      return this.pauseMessage();
+      return fail(this.pauseMessage());
     }
     // New keys saved during the exchange (a restart) drop its answer.
     const epoch = this.epoch;
     const client = this.config.client;
+    const endpoint = this.config.tokenEndpoint;
     let token;
     try {
       token = await tokenRequest(
@@ -1074,39 +1154,41 @@ export class OuraApp {
           code,
           redirect_uri: signIn.entry.redirectUri,
         },
-        this.tokenOptions(timeout),
+        this.tokenOptions(timeout, endpoint),
       );
     } catch (err) {
       this.logger.warn(`Oura authorization failed: ${errorReason(err)}`);
       if (err.kind === 'timeout') {
         // The code may have been used by Oura meanwhile: a new authorization is the safe way.
-        return T.signIn.slow;
+        return fail(T.signIn.slow);
       }
       if (err.kind === 'refused') {
-        return T.signIn.refused(err.detail ?? 'HTTP 400');
+        return fail(T.signIn.refused(err.detail ?? 'HTTP 400'));
       }
       if (PAUSING.has(err.kind)) {
         await this.pause(err);
         this.signIns.restore(signIn);
-        return this.pauseMessage();
+        return fail(this.pauseMessage());
       }
       if (!pasted) {
         // Gladys' return cannot be replayed: only a new click on Connect helps.
-        return T.signIn.retryConnect(errorReason(err));
+        return fail(T.signIn.retryConnect(errorReason(err)));
       }
       // Oura was not reached: the same address can be pasted again.
       this.signIns.restore(signIn);
-      return T.signIn.failed(errorReason(err));
+      return fail(T.signIn.failed(errorReason(err)));
     }
     if (epoch !== this.epoch || client !== this.config.client) {
-      return T.signIn.unknown;
+      return fail(T.signIn.unknown);
     }
     if (!token.refreshToken) {
-      return T.signIn.noRefresh;
+      return fail(T.signIn.noRefresh);
     }
     // A renewal still running with the previous session must not overwrite this one.
     this.epoch += 1;
-    this.memory.session = { client: this.config.client, ...token };
+    const mine = this.epoch;
+    // The session remembers its token endpoint: it is renewed there.
+    this.memory.session = { client, ...token, endpoint };
     this.memory.block = null;
     this.blocked = undefined;
     this.failures = 0;
@@ -1120,22 +1202,37 @@ export class OuraApp {
     }
     await this.saveMemory();
     this.logger.info('Oura: authorized');
-    this.scheduleRenew();
-    await this.publishDevices();
     // One read now, unless one ran less than the interval ago (then at its time).
     const due = (this.memory.lastCycleAt ?? -Infinity) + this.interval;
-    if (due > this.now()) {
-      await this.setStatus(false, T.nextRead(age(due - this.now())));
-      this.scheduleAt(due);
-    } else {
-      await this.setStatus(false, T.connecting);
-      this.tick({ quick: true }).catch((err) =>
-        this.logger.error(`Oura refresh failed: ${err.message}`),
-      );
-    }
-    return T.signIn.done;
+    const later = due > this.now() ? T.signIn.doneLater(age(due - this.now())) : null;
+    this.afterSignIn(mine, due, later).catch((err) =>
+      this.logger.error(`Oura refresh failed: ${err.message}`),
+    );
+    return { ok: true, message: later ?? T.signIn.done };
   }
 
+  /** After a sign-in: renewal timer, Discovery, status, the read (or its time). */
+  async afterSignIn(mine, due, later) {
+    if (mine !== this.epoch) {
+      return;
+    }
+    this.scheduleRenew();
+    await this.publishDevices();
+    if (mine !== this.epoch) {
+      return;
+    }
+    if (later) {
+      await this.setStatus(false, later);
+      if (mine === this.epoch) {
+        this.scheduleAt(due);
+      }
+      return;
+    }
+    await this.setStatus(false, T.connecting);
+    if (mine === this.epoch) {
+      await this.tick({ quick: true });
+    }
+  }
   // --- Configuration buttons ----------------------------------------------------
 
   async testConnection() {

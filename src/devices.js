@@ -70,22 +70,23 @@ export function buildDevice(gladys, client, language) {
 }
 
 /**
- * The states of the values of a read: `[[featureId, value]]`, only for the
- * values present and within the bounds of the feature (an absent value is
- * never published, never as 0).
+ * The readings of a read (src/model.js): `[[featureId, reading]]`, only for
+ * the values present and within the bounds of the feature (an absent value
+ * is never published, never as 0).
  */
-export function deviceStates(gladys, client, values) {
+export function deviceStates(gladys, client, readings) {
   const ids = deviceIds(gladys, client);
   const states = [];
   for (const [role, spec] of Object.entries(FEATURES)) {
-    const value = values?.[role];
+    const reading = readings?.[role];
+    const value = reading?.value;
     if (
       typeof value === 'number' &&
       Number.isFinite(value) &&
       value >= spec.min &&
       value <= spec.max
     ) {
-      states.push([ids.feature(role), value]);
+      states.push([ids.feature(role), reading]);
     }
   }
   return states;

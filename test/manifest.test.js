@@ -80,6 +80,16 @@ test('every text is in English and French; the intro says it is not a medical de
       assert.ok(text[lang]?.trim(), `${path} needs ${lang}`);
     }
   }
+  // Review 1 (M10): both descriptions name sleep, readiness and activity.
+  assert.match(manifest.description.en, /sleep, readiness, activity/);
+  assert.match(manifest.description.fr, /sommeil, récupération, activité/);
+  // Review 1 (M9, I2): the docs say a renewal token may be lost, and name the spo2 scope.
+  assert.match(read('docs/en.md'), /lose the new renewal token/);
+  assert.match(read('docs/fr.md'), /perdre le nouveau jeton/);
+  for (const lang of ['en', 'fr']) {
+    assert.doesNotMatch(read(`docs/${lang}.md`), /spo2Daily/);
+    assert.match(read(`docs/${lang}.md`), /\*\*spo2\*\*/);
+  }
   const intro = manifest.config_schema.find((f) => f.key === 'intro');
   assert.match(intro.description.en, /^NOT A MEDICAL DEVICE/);
   assert.match(intro.description.fr, /^PAS UN DISPOSITIF MÉDICAL/);

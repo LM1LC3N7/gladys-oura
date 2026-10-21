@@ -7,7 +7,7 @@ import { POLL_MINUTES, TOKEN_URLS } from './constants.js';
 
 /** Defaults, mirrored by the manifest (checked by test/manifest.test.js). */
 export const DEFAULTS = {
-  token_endpoint: 'api',
+  token_endpoint: 'moi',
   poll_minutes: POLL_MINUTES.default,
   language: 'fr',
 };

@@ -56,7 +56,7 @@ redirection** (voir l’étape 4).
 4. Dans **Redirect URIs**, collez l’adresse de l’étape 1 (ou la vôtre). Elle
    doit correspondre à l’identique.
 5. Si le formulaire demande des autorisations (scopes), autorisez au moins
-   **daily**, **heartrate** et **spo2Daily** (rien d’autre n’est utile).
+   **daily**, **heartrate** et **spo2** (rien d’autre n’est utile).
 6. Enregistrez. Copiez le **Client ID** et le **Client Secret** de
    l’application.
 
@@ -65,8 +65,10 @@ redirection** (voir l’étape 4).
 1. Collez le **Client ID** et le **Client Secret** dans Gladys, puis
    enregistrez. Le Client Secret est gardé par Gladys dans sa base, jamais
    réaffiché, envoyé seulement à Oura.
-2. Laissez **Point d’échange des jetons** sur `api.ouraring.com` (celui de la
-   documentation).
+2. Laissez **Point d’échange des jetons** sur `moi.ouraring.com` : celui en
+   service pour les applications du portail développeur actuel et pour la
+   plupart des anciennes (c’est celui qu’utilise l’intégration Home
+   Assistant).
 
 ### 4. Autoriser
 
@@ -81,11 +83,13 @@ redirection** (voir l’étape 4).
 4. Ouvrez l’onglet **Découverte** et ajoutez la bague.
 
 Si Oura refuse l’autorisation alors que le Client ID, le Client Secret et
-l’URL de redirection sont justes, choisissez `moi.ouraring.com` dans **Point
-d’échange des jetons** (celui du nouveau portail développeur, utilisé par
-l’intégration Home Assistant), enregistrez et cliquez de nouveau sur
-**Connecter**. Un code ne sert qu’une fois : les deux points ne sont jamais
-essayés l’un après l’autre.
+l’URL de redirection sont justes (quelques anciennes applications), choisissez
+`api.ouraring.com` dans **Point d’échange des jetons** (celui que la
+spécification OpenAPI nomme encore), enregistrez et cliquez de nouveau sur
+**Connecter**. Un code refusé est consommé : les deux points ne sont jamais
+essayés l’un après l’autre. Un changement de ce champ vaut au prochain
+Connecter : une session en cours continue de se renouveler là où elle a été
+émise.
 
 ## L’appareil
 
@@ -127,6 +131,10 @@ et une fréquence cardiaque de plus de 3 heures ne sont jamais publiés.
 - Le jeton est renouvelé par un minuteur avant sa fin, un renouvellement à la
   fois, jamais deux en moins d’une minute. Les jetons de renouvellement
   d’Oura ne servent qu’une fois : le nouveau est enregistré tout de suite.
+- Une valeur est publiée une fois par enregistrement (la valeur et son jour,
+  ou la fréquence cardiaque et son heure) : rien n’est renvoyé quand Oura est
+  en panne ou que la bague ne synchronise pas, et la fréquence cardiaque porte
+  l’heure de sa mesure.
 
 ## États
 
@@ -139,10 +147,16 @@ et une fréquence cardiaque de plus de 3 heures ne sont jamais publiés.
   redémarrage ; cliquez sur Connecter, ou une fois sur **Tester Oura** (après
   l’intervalle).
 - **Oura a refusé les données (403)** : l’API demande un abonnement Oura
-  actif ; nouvelle lecture après 6 heures.
+  actif, ou les données du jour n’ont pas été autorisées (cliquez alors sur
+  Connecter) ; nouvelle lecture après 6 heures.
 - **Non lu cette fois : SpO2…** : une collection a été refusée (autorisation
   non accordée, bague sans cette fonction) ou a échoué ; les autres sont
   publiées.
+- Un redémarrage du conteneur, ou une réponse d’Oura arrivée trop tard, dans
+  les secondes mêmes d’un renouvellement peut perdre le nouveau jeton de
+  renouvellement (il ne sert qu’une fois) : l’état devient alors **Session
+  terminée** ; cliquez sur Connecter. Rare, inhérent aux jetons à usage
+  unique.
 
 ## Confidentialité
 

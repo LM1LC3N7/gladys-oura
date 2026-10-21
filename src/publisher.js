@@ -1,11 +1,13 @@
 // -----------------------------------------------------------------------------
-// What goes to Gladys, within its limit of 300 states per minute: push()
-// keeps the current value of a feature (the last one wins); unchanged values
-// are skipped by publishChangedStates and sent again every hour. One flush
-// at a time (a flush during a flush joins it), so the budget of the minute
-// holds even when several publications start together. Everything left over
-// (budget spent, Gladys unreachable) waits for the next flush, every second.
-// (Taken from gladys-sungrow.)
+// What goes to Gladys, within its limit of 300 states per minute. push()
+// keeps the current reading of a feature (the last one wins) with its key
+// (value@day, bpm@timestamp, as gladys-dexcom): a reading whose key was
+// already sent is never sent again (no heartbeat: Gladys would date an old
+// value as new), and a reading past its `until` is dropped before sending.
+// One flush at a time, so the budget of the minute holds even when several
+// publications start together; the states are counted before the request.
+// What is left over (budget spent, Gladys unreachable) waits for the next
+// flush, every second.
 // -----------------------------------------------------------------------------
 
 import { LIMITS, MINUTE, TIMINGS } from './constants.js';
@@ -16,8 +18,10 @@ export class StatePublisher {
     this.logger = logger;
     this.now = now;
     this.timers = timers;
-    /** featureId -> { state } */
+    /** featureId -> { state, created_at?, key, until } */
     this.pending = new Map();
+    /** featureId -> the key last sent. */
+    this.sent = new Map();
     this.window = [];
     this.timer = undefined;
     this.flushing = undefined;
@@ -37,22 +41,34 @@ export class StatePublisher {
     }
   }
 
-  push(featureId, value) {
-    this.pending.set(featureId, value);
+  /** A reading of a feature: queued unless already sent or no longer current. */
+  push(featureId, { value, key, until, createdAt }) {
+    if (this.sent.get(featureId) === key || this.now() >= until) {
+      return;
+    }
+    this.pending.set(featureId, {
+      state: value,
+      ...(createdAt ? { created_at: createdAt } : {}),
+      key,
+      until,
+    });
   }
 
-  /** Forgets what is pending for a deleted device and its features. */
+  /** Forgets what is pending and what was sent for a device (Gladys forgot it, or it is new). */
   forget(deviceId) {
-    for (const id of [...this.pending.keys()]) {
-      if (id === deviceId || id.startsWith(`${deviceId}:`)) {
-        this.pending.delete(id);
+    for (const map of [this.pending, this.sent]) {
+      for (const id of [...map.keys()]) {
+        if (id === deviceId || id.startsWith(`${deviceId}:`)) {
+          map.delete(id);
+        }
       }
     }
   }
 
-  /** Forgets everything pending (new keys: the values of the previous app). */
+  /** Forgets everything (new keys: the values of the previous app). */
   clear() {
     this.pending.clear();
+    this.sent.clear();
   }
 
   flush() {
@@ -72,25 +88,39 @@ export class StatePublisher {
       return;
     }
     const batch = [];
-    for (const [featureId, value] of this.pending) {
+    for (const [featureId, entry] of this.pending) {
       if (batch.length >= room) {
         break;
       }
       this.pending.delete(featureId);
-      batch.push({ device_feature_external_id: featureId, ...value });
+      if (now >= entry.until) {
+        // Waited too long (Gladys unreachable): no longer current.
+        continue;
+      }
+      batch.push([featureId, entry]);
     }
-    // Counted before the request: a failed or slow request never lets a
-    // second batch exceed the budget of the minute.
+    if (batch.length === 0) {
+      return;
+    }
     for (let i = 0; i < batch.length; i += 1) {
       this.window.push(now);
     }
     try {
-      await this.gladys.publishChangedStates(batch, { heartbeat: TIMINGS.stateHeartbeat });
+      await this.gladys.publishStates(
+        batch.map(([id, { state, created_at: createdAt }]) => ({
+          device_feature_external_id: id,
+          state,
+          ...(createdAt ? { created_at: createdAt } : {}),
+        })),
+      );
+      for (const [id, entry] of batch) {
+        this.sent.set(id, entry.key);
+      }
     } catch (err) {
-      // Kept for the next round, unless a newer value arrived meanwhile.
-      for (const { device_feature_external_id: id, ...value } of batch) {
+      // Kept for the next round, unless a newer reading arrived meanwhile.
+      for (const [id, entry] of batch) {
         if (!this.pending.has(id)) {
-          this.pending.set(id, value);
+          this.pending.set(id, entry);
         }
       }
       throw err;

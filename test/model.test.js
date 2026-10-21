@@ -98,6 +98,7 @@ test('the queries: three days around now, the heart rate of the window', () => {
   assert.deepEqual(queryOf('heartrate', NOW, 3 * HOUR), {
     start_datetime: '2026-10-21T05:00:00Z',
     end_datetime: '2026-10-21T08:00:00Z',
+    fields: 'timestamp,bpm',
   });
 });
 
@@ -112,9 +113,9 @@ test('the device: units of the core only, read only, no history; states within b
   }
   assert.equal(device.features.length, Object.keys(FEATURES).length);
   const states = deviceStates(gladys, '0123456789abcdef', {
-    sleep_score: 101,
-    steps: 10,
-    spo2: null,
+    sleep_score: { value: 101 },
+    steps: { value: 10 },
+    spo2: { value: null },
     heart_rate: undefined,
   });
   assert.deepEqual(
@@ -160,7 +161,7 @@ test('the configuration and the memory are repaired', () => {
   });
   assert.equal(config.clientId, 'id');
   assert.equal(config.clientSecret, '');
-  assert.equal(config.tokenEndpoint, 'api');
+  assert.equal(config.tokenEndpoint, 'moi');
   assert.equal(config.redirectUri, '');
   assert.equal(config.pollMinutes, 15);
   const memory = normalizeMemory(

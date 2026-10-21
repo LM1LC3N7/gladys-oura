@@ -107,8 +107,8 @@ export const T = {
     ),
   forbidden: (wait) =>
     both(
-      `Oura refused the data (403: the API needs an active Oura membership): next try in ${wait.en}.`,
-      `Oura a refusé les données (403 : l’API demande un abonnement Oura actif) : nouvel essai dans ${wait.fr}.`,
+      `Oura refused the data (403: the API needs an active Oura membership, or the daily data was not allowed: then click Connect): next try in ${wait.en}.`,
+      `Oura a refusé les données (403 : l’API demande un abonnement Oura actif, ou les données du jour n’ont pas été autorisées : cliquez alors sur Connecter) : nouvel essai dans ${wait.fr}.`,
     ),
   budget: (wait) =>
     both(
@@ -183,5 +183,10 @@ export const T = {
       'Oura n’a donné aucun jeton de renouvellement : cliquez de nouveau sur Connecter.',
     ),
     done: both('Authorized by Oura: reading the data…', 'Autorisé par Oura : lecture des données…'),
+    doneLater: (wait) =>
+      both(
+        `Authorized by Oura; next read in ${wait.en} (never sooner than the refresh interval after the last read).`,
+        `Autorisé par Oura ; prochaine lecture dans ${wait.fr} (jamais plus tôt que l’intervalle de relecture après la dernière lecture).`,
+      ),
   },
 };

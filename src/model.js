@@ -129,9 +129,16 @@ const decimal = (value, min, max, digits = 2) => {
   return n === null ? null : Math.round(n * 10 ** digits) / 10 ** digits;
 };
 
+/** The end of the time a daily record of `day` counts as current (two days after its start, UTC). */
+export const dayUntil = (day) => Date.parse(`${day}T00:00:00Z`) + 2 * DAY;
+
 /**
  * The answers of a cycle (by collection, missing ones absent) -> the values
- * by feature role (null when not available), and the day of the sleep data.
+ * by feature role (null when not available), the day of the sleep data, and
+ * the readings: by role, `{ value, key, until, createdAt? }`. `key` changes
+ * only with the record (value@day, bpm@timestamp): the same record is never
+ * published twice. `until`: the time it stops counting as current (never
+ * published after). `createdAt`: the time of the heart rate sample.
  */
 export function valuesOf(answers, now) {
   const sleepDaily = latestDaily(answers.daily_sleep, now);
@@ -140,22 +147,38 @@ export function valuesOf(answers, now) {
   const spo2 = latestDaily(answers.daily_spo2, now);
   const sleep = mainSleep(answers.sleep, now);
   const heart = latestHeartRate(answers.heartrate ?? [], now);
-  return {
-    day: sleepDaily?.day ?? null,
-    values: {
-      sleep_score: integer(sleepDaily?.score, 0, 100),
-      readiness_score: integer(readiness?.score, 0, 100),
-      activity_score: integer(activity?.score, 0, 100),
-      sleep_duration: hours(sleep?.total_sleep_duration),
-      deep_sleep: hours(sleep?.deep_sleep_duration),
-      rem_sleep: hours(sleep?.rem_sleep_duration),
-      lowest_heart_rate: integer(sleep?.lowest_heart_rate, 20, 250),
-      average_hrv: integer(sleep?.average_hrv, 0, 500),
-      temperature_deviation: decimal(readiness?.temperature_deviation, -10, 10),
-      spo2: decimal(spo2?.spo2_percentage?.average, 50, 100, 1),
-      steps: integer(activity?.steps, 0, 500_000),
-      active_calories: integer(activity?.active_calories, 0, 50_000),
-      heart_rate: heart?.bpm ?? null,
-    },
+  const sources = {
+    sleep_score: [sleepDaily, integer(sleepDaily?.score, 0, 100)],
+    readiness_score: [readiness, integer(readiness?.score, 0, 100)],
+    activity_score: [activity, integer(activity?.score, 0, 100)],
+    sleep_duration: [sleep, hours(sleep?.total_sleep_duration)],
+    deep_sleep: [sleep, hours(sleep?.deep_sleep_duration)],
+    rem_sleep: [sleep, hours(sleep?.rem_sleep_duration)],
+    lowest_heart_rate: [sleep, integer(sleep?.lowest_heart_rate, 20, 250)],
+    average_hrv: [sleep, integer(sleep?.average_hrv, 0, 500)],
+    temperature_deviation: [readiness, decimal(readiness?.temperature_deviation, -10, 10)],
+    spo2: [spo2, decimal(spo2?.spo2_percentage?.average, 50, 100, 1)],
+    steps: [activity, integer(activity?.steps, 0, 500_000)],
+    active_calories: [activity, integer(activity?.active_calories, 0, 50_000)],
   };
+  const values = {};
+  const readings = {};
+  for (const [role, [record, value]] of Object.entries(sources)) {
+    values[role] = value;
+    if (value !== null) {
+      readings[role] = { value, key: `${value}@${record.day}`, until: dayUntil(record.day) };
+    }
+  }
+  values.heart_rate = heart?.bpm ?? null;
+  if (heart) {
+    const at = new Date(heart.at).toISOString();
+    readings.heart_rate = {
+      value: heart.bpm,
+      key: `${heart.bpm}@${at}`,
+      until: heart.at + TIMINGS.heartRateWindow,
+      createdAt: at,
+      at: heart.at,
+    };
+  }
+  return { day: sleepDaily?.day ?? null, values, readings };
 }

@@ -2,8 +2,9 @@
 // What must survive a restart, in /data (the only writable place of the
 // container). Never a password (it is typed on the Oura page only), never
 // the client secret (kept by Gladys), never a health value:
-//   - the session: the access and renewal tokens with their ends, and the
-//     client they belong to (a hash of the client id);
+//   - the session: the access and renewal tokens with their ends, the client
+//     they belong to (a hash of the client id) and the token endpoint that
+//     issued them;
 //   - a stop that only the user can lift (renewal refused, access refused
 //     with a new token), with its client, so a restart never retries it;
 //   - when the last cycle succeeded (a restart before the next read stays
@@ -18,7 +19,7 @@
 // -----------------------------------------------------------------------------
 
 import { open, readFile, rename } from 'node:fs/promises';
-import { DAY, LIMITS, TIMINGS } from './constants.js';
+import { DAY, LIMITS, TIMINGS, TOKEN_URLS } from './constants.js';
 
 export const STATE_FILE = '/data/oura-state.json';
 
@@ -27,6 +28,8 @@ export function fileStore(path = STATE_FILE) {
   let chain = Promise.resolve();
   return {
     async load() {
+      // After the writes already asked: never an older file than the last save.
+      await chain;
       try {
         return JSON.parse(await readFile(path, 'utf8'));
       } catch {
@@ -82,6 +85,8 @@ function session(raw) {
     refreshToken,
     expiresAt: time(s.expiresAt) ?? 0,
     obtainedAt: time(s.obtainedAt) ?? 0,
+    // The token endpoint that issued it: renewed there (null: the one configured).
+    endpoint: Object.hasOwn(TOKEN_URLS, s.endpoint) ? s.endpoint : null,
   };
 }
 

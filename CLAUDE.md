@@ -45,7 +45,7 @@ src/api.js          one GET of a collection, its query (days or times)
 src/http.js         the only network access (node:https, bounded), errors by status, JSON
 src/model.js        answers -> values (pure): latest daily record, main sleep, heart rate
 src/devices.js      the device and its states (pure)
-src/publisher.js    states within 300/min
+src/publisher.js    states within 300/min, each record once (key value@day, bpm@time)
 src/store.js        /data/oura-state.json (0600): tokens, stop, pause, budget, times
 src/config.js       config_schema normalized, client key (hash of the client id)
 src/constants.js    endpoints, scopes, collections, manifest keys, limits, timings
@@ -64,7 +64,8 @@ test/helpers/       a fake Oura behind the transport; Gladys is the SDK's fake
   (`url`), `test_connection`) are frozen.
 - **Health data**: read only, no command; values in memory only, never in a
   log, a status, an error nor `/data`; no history by default; only recent
-  data published. Say "not a medical device" wherever the user reads.
+  data published, each record once (never a heartbeat, never queued after a
+  failed read; the heart rate with `created_at` = its sample time). Say "not a medical device" wherever the user reads.
 - **Authorization only on a click** (Connect, Finish the authorization): never
   from a start, a `connected`, a cycle or a retry. The state serves once. A
   refused renewal is the `expired` stop; an access refused with a fresh token
@@ -73,7 +74,9 @@ test/helpers/       a fake Oura behind the transport; Gladys is the SDK's fake
 - **Token renewal**: by a timer at the end minus min(10 min, half the
   lifetime), one at a time (joined), never twice within a minute (kept in
   `/data` before the request), never during a hard pause. Renewal tokens
-  serve once: the new one is saved at once. Never both token endpoints.
+  serve once: the new one is saved at once, even across a restart (start()
+  waits for it; dropped only when the session was replaced). A session is
+  renewed at the endpoint that issued it. Never both token endpoints.
 - **Rate limits**: never read sooner than the interval (test button, scan,
   `connected`, unchanged configuration, restart, sign-in); 429 / 5xx / budget
   pause every path, 403 pauses the reads, all kept in `/data`. A secondary

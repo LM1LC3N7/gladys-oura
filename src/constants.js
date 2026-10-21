@@ -16,14 +16,17 @@ export const DAY = 24 * HOUR;
 export const AUTHORIZE_URL = 'https://cloud.ouraring.com/oauth/authorize';
 
 /**
- * The token endpoints. `api`: the one of the Oura documentation (oura-ring);
- * `moi`: the one the Home Assistant integration uses for the apps of the new
- * developer portal. Chosen in the configuration, never tried one after the
- * other (an authorization code serves once).
+ * The token endpoints. `moi`: the live one for the apps of the legacy and of
+ * the current developer portal, according to the Home Assistant integration
+ * (const.py, application_credentials.py, issue #75), the default; `api`: the
+ * one of the OpenAPI specification and of oura-ring, kept for the few legacy
+ * apps that `moi` refuses. Chosen in the configuration, never tried one
+ * after the other (a refused code is consumed). A session is renewed at the
+ * endpoint that issued it.
  */
 export const TOKEN_URLS = {
-  api: 'https://api.ouraring.com/oauth/token',
   moi: 'https://moi.ouraring.com/oauth/v2/ext/oauth-token',
+  api: 'https://api.ouraring.com/oauth/token',
 };
 
 /** The API v2, read only. */
@@ -31,9 +34,10 @@ export const API_BASE = 'https://api.ouraring.com/v2/usercollection';
 
 /**
  * The scopes asked: only what the features need (no e-mail, no personal
- * information, no workout, tag or session).
+ * information, no workout, tag or session). Names of the OpenAPI
+ * specification 1.41 (`spo2`; `spo2Daily` was its name up to 1.37).
  */
-export const SCOPES = ['daily', 'heartrate', 'spo2Daily'];
+export const SCOPES = ['daily', 'heartrate', 'spo2'];
 
 /**
  * The collections read at each cycle, in this order. The first one is the
@@ -67,8 +71,8 @@ export const DEVICE_TYPE = 'ring';
 
 export const TIMINGS = {
   requestTimeout: 15 * SECOND,
-  /** A button waits less (actions time out after 60 s). */
-  quickTimeout: 10 * SECOND,
+  /** A button waits less: 9 requests at most stay within its 120 s. */
+  quickTimeout: 8 * SECOND,
   /** The code exchange of Gladys' OAuth return: Gladys waits for its answer. */
   callbackTimeout: 3500,
   /** A pause after an ordinary error, kept in /data, read back capped at this. */
@@ -94,8 +98,6 @@ export const TIMINGS = {
   /** A sign-in started (Connect) can be finished for 15 minutes. */
   signInTtl: 15 * MINUTE,
   testCooldown: 30 * SECOND,
-  /** An unchanged state is sent again every hour. */
-  stateHeartbeat: HOUR,
   flushInterval: SECOND,
   /** The heart rate read: the last 3 hours; an older sample is never published. */
   heartRateWindow: 3 * HOUR,

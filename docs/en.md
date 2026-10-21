@@ -48,7 +48,7 @@ yours instead and fill it in **Redirect URI** (see step 4).
 4. In **Redirect URIs**, paste the address of step 1 (or yours). It must match
    exactly.
 5. If the form asks for scopes, allow at least **daily**, **heartrate** and
-   **spo2Daily** (nothing else is needed).
+   **spo2** (nothing else is needed).
 6. Save. Copy the **Client ID** and the **Client Secret** of the application.
 
 ### 3. Fill in the configuration
@@ -56,7 +56,9 @@ yours instead and fill it in **Redirect URI** (see step 4).
 1. Paste the **Client ID** and the **Client Secret** in Gladys, then save. The
    Client Secret is kept by Gladys in its database, never shown again, sent
    only to Oura.
-2. Leave **Token endpoint** on `api.ouraring.com` (the documented one).
+2. Leave **Token endpoint** on `moi.ouraring.com`: the live token endpoint for the
+   apps of the current developer portal and for most older ones (it is the one
+   the Home Assistant integration uses).
 
 ### 4. Authorize
 
@@ -71,10 +73,11 @@ yours instead and fill it in **Redirect URI** (see step 4).
 4. Open the **Discovery** tab and add the ring.
 
 If Oura refuses the authorization while the Client ID, the Client Secret and
-the redirect URI are right, choose `moi.ouraring.com` in **Token endpoint**
-(the one of the new developer portal, used by the Home Assistant integration),
-save and click **Connect** again. A code serves once: the two endpoints are
-never tried one after the other.
+the redirect URI are right (a few old apps), choose `api.ouraring.com` in
+**Token endpoint** (the one the OpenAPI specification still names), save and
+click **Connect** again. A refused code is consumed: the two endpoints are
+never tried one after the other. A change of this field applies at the next
+Connect: a running session keeps renewing at the endpoint that issued it.
 
 ## The device
 
@@ -111,6 +114,9 @@ ring did not sync) and a heart rate older than 3 hours are never published.
 - The token is renewed by a timer before its end, one renewal at a time,
   never twice within a minute. Oura's renewal tokens serve once: the new one
   is saved at once.
+- A value is published once per record (the value and its day, or the heart
+  rate and its time): nothing is sent again while Oura is down or the ring does
+  not sync, and the heart rate carries the time of its sample.
 
 ## Statuses
 
@@ -119,10 +125,15 @@ ring did not sync) and a heart rate older than 3 hours are never published.
   itself; click Connect to authorize again.
 - **Access refused even with a new token**: kept across a restart; click
   Connect, or **Test Oura** once (after the interval).
-- **Oura refused the data (403)**: the API needs an active Oura membership;
+- **Oura refused the data (403)**: the API needs an active Oura membership, or
+  the daily data was not allowed at the authorization (then click Connect);
   read again after 6 hours.
 - **Not read this time: SpO2…**: one collection was refused (scope not
   granted, ring without that feature) or failed; the others are published.
+- A restart of the container, or an answer of Oura arriving too late, in the
+  very seconds of a renewal can lose the new renewal token (it serves once):
+  the status then becomes **Session ended**; click Connect. Rare, inherent to
+  single-use renewal tokens.
 
 ## Privacy
 

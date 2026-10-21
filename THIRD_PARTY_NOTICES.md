@@ -47,7 +47,7 @@ commit `a3943180`, read on 2026-10-21).
 
 Ported in `src/constants.js`, `src/api.js` and `src/model.js`: the API base,
 the collections and their date or time parameters, the paging by
-`next_token`, the second token endpoint (`moi.ouraring.com`), the choice of
+`next_token`, the live token endpoint (`moi.ouraring.com`, the default), the choice of
 the records (latest daily record, completed main sleep, latest heart rate
 sample) and the fields read from each.
 
