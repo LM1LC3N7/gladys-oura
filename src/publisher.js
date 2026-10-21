@@ -44,6 +44,9 @@ export class StatePublisher {
   /** A reading of a feature: queued unless already sent or no longer current. */
   push(featureId, { value, key, until, createdAt }) {
     if (this.sent.get(featureId) === key || this.now() >= until) {
+      // What Gladys holds (or is being sent) is this reading: an older one
+      // still waiting must not replace it once Gladys is back.
+      this.pending.delete(featureId);
       return;
     }
     this.pending.set(featureId, {
@@ -105,6 +108,13 @@ export class StatePublisher {
     for (let i = 0; i < batch.length; i += 1) {
       this.window.push(now);
     }
+    // The keys count as sent from the request on (as the SDK does): a reading
+    // pushed again meanwhile is not sent twice; the previous key comes back on
+    // a failure.
+    const previous = new Map(batch.map(([id]) => [id, this.sent.get(id)]));
+    for (const [id, entry] of batch) {
+      this.sent.set(id, entry.key);
+    }
     try {
       await this.gladys.publishStates(
         batch.map(([id, { state, created_at: createdAt }]) => ({
@@ -113,12 +123,16 @@ export class StatePublisher {
           ...(createdAt ? { created_at: createdAt } : {}),
         })),
       );
-      for (const [id, entry] of batch) {
-        this.sent.set(id, entry.key);
-      }
     } catch (err) {
       // Kept for the next round, unless a newer reading arrived meanwhile.
       for (const [id, entry] of batch) {
+        if (this.sent.get(id) === entry.key) {
+          if (previous.get(id) === undefined) {
+            this.sent.delete(id);
+          } else {
+            this.sent.set(id, previous.get(id));
+          }
+        }
         if (!this.pending.has(id)) {
           this.pending.set(id, entry);
         }

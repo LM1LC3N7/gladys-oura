@@ -898,3 +898,80 @@ test('M8: a restart that stays connected publishes the badge at once', async (t)
   assert.equal(gladys.fake.connectionStatus.connected, true);
   assert.equal(gladys.fake.transports.at(-1)?.transport, DEVICE_TRANSPORTS.CLOUD);
 });
+
+// --- Review 2 remarks (scenarios N2, N3) -------------------------------------------
+
+test('R1/N2: a value back to the one Gladys holds while Gladys was unreachable: Gladys ends on it', async (t) => {
+  const server = fakeOura();
+  const day = new Date(NOW).toISOString().slice(0, 10);
+  let score = 64;
+  server.data = { ...collections(NOW), daily_activity: () => [{ day, score, steps: 4321 }] };
+  const { gladys, advance } = await setup(t, { server });
+  assert.equal(last(gladys, 'activity_score'), 64);
+  const real = gladys.publishStates.bind(gladys);
+  let down = false;
+  gladys.publishStates = async (states) => {
+    if (down) throw new Error('Gladys unreachable');
+    return real(states);
+  };
+  score = 65;
+  down = true;
+  await advance(31 * MINUTE, MINUTE);
+  score = 64;
+  await advance(30 * MINUTE, MINUTE);
+  down = false;
+  await advance(5 * SECOND, SECOND);
+  assert.equal(last(gladys, 'activity_score'), 64, 'the older pending value never wins');
+});
+
+test('R2/N3: a device update during a slow publication never sends the same reading twice', async (t) => {
+  const { gladys, app, server, connect } = await setup(t, { signIn: false });
+  await gladys.fake.oauthCallback(OAUTH_FIELD, await connect());
+  await settle();
+  const real = gladys.publishStates.bind(gladys);
+  let hold;
+  let held = false;
+  gladys.publishStates = async (states) => {
+    if (!held) {
+      held = true;
+      await new Promise((resolve) => (hold = resolve));
+    }
+    return real(states);
+  };
+  const [device] = gladys.fake.discoveredDevices;
+  const creating = gladys.fake.deviceCreated(device);
+  await settle();
+  assert.ok(hold, 'first publication in flight');
+  const updating = app.deviceUpdated(
+    gladys.devices.find((d) => d.external_id === device.external_id) ?? device,
+  );
+  await settle();
+  hold();
+  await creating;
+  await updating;
+  t.mock.timers.tick(3 * SECOND);
+  await settle();
+  assert.ok(server.apiRequests.length > 0);
+  assert.equal(
+    gladys.fake.states.filter((s) => s.device_feature_external_id === feature('sleep_score'))
+      .length,
+    1,
+  );
+  assert.equal(hrStates(gladys).length, 1);
+});
+
+test('R2: a failed publication puts the previous key back, the reading goes at the next flush', async (t) => {
+  const { gladys, server, advance } = await setup(t);
+  const real = gladys.publishStates.bind(gladys);
+  let fail = true;
+  gladys.publishStates = async (states) => {
+    if (fail) {
+      fail = false;
+      throw new Error('Gladys unreachable');
+    }
+    return real(states);
+  };
+  server.data = { ...collections(NOW), daily_activity: [{ day: '2026-10-21', steps: 5000 }] };
+  await advance(31 * MINUTE, MINUTE);
+  assert.equal(last(gladys, 'steps'), 5000);
+});

@@ -101,6 +101,11 @@ Gladys has no unit for a heart rate, a score or a blood oxygen: the unit is in
 the name. Only data of yesterday or today counts as current: an older day (the
 ring did not sync) and a heart rate older than 3 hours are never published.
 
+The **Latest heart rate** is published with the time of its sample (it often
+arrives minutes or hours later, when the app syncs). Gladys then stores it as
+a dated value: a **scene triggered on this feature does not fire** (the other
+features, published without a date, trigger scenes as usual).
+
 ## Requests and limits
 
 - One read every **30 minutes** by default (15 to 240): 6 to 8 requests per

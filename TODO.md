@@ -94,6 +94,13 @@ up to date at the end of every milestone.
   a failed read, `publishStates` with `created_at` = the sample time for the
   heart rate; a device created again gets only the readings still current.
   A heart rate older than the last one sent is never sent.
+- **A dated heart rate does not trigger scenes** (review 2): with `created_at`
+  the core goes through `saveHistoricalState`, which emits no
+  `TRIGGERS.CHECK` (unlike `saveState`). Kept on purpose: the exact time of
+  the sample matters more than a scene on a value that may be hours late.
+  Said in the docs. The keys are set as sent before the request (the
+  previous one put back on a failure), and a reading equal to what was sent
+  drops an older one still waiting (review 2).
 - **Heart rate pages**: oldest first, three at most, `fields=timestamp,bpm`;
   a failing page keeps those already read (the sample keeps its own time).
 - **The OAuth return is acked once the session is in `/data`**; Discovery,

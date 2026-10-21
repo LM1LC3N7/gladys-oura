@@ -115,6 +115,12 @@ sanguin : l’unité est dans le nom. Seules les données d’hier ou d’aujour
 comptent comme actuelles : un jour plus ancien (la bague n’a pas synchronisé)
 et une fréquence cardiaque de plus de 3 heures ne sont jamais publiés.
 
+La **Dernière fréquence cardiaque** est publiée avec l’heure de sa mesure (elle
+arrive souvent des minutes ou des heures plus tard, quand l’application
+synchronise). Gladys l’enregistre alors comme une valeur datée : **une scène
+déclenchée sur cette fonction ne se déclenche pas** (les autres fonctions,
+publiées sans date, déclenchent les scènes comme d’habitude).
+
 ## Requêtes et limites
 
 - Une lecture toutes les **30 minutes** par défaut (15 à 240) : 6 à 8
