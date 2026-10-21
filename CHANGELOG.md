@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-21
+
 ### Added
 
 - The Oura ring through the official Oura API v2, read only, one Gladys
@@ -35,4 +37,5 @@ the notes of the version's GitHub Release.
   the logs, the statuses nor `/data`.
 - Docs in English and French with the Oura app step by step, cover image.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-oura/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-oura/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-oura/releases/tag/v0.1.1
