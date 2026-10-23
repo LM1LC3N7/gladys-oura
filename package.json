@@ -1,6 +1,6 @@
 {
   "name": "gladys-oura",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Oura ring for Gladys Assistant through the official Oura API v2 (OAuth2), read only: sleep, readiness and activity scores, sleep durations, heart rate, SpO2. Not a medical device.",
   "type": "module",
