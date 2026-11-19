@@ -159,3 +159,4 @@ up to date at the end of every milestone.
   `sleep` answer of three days.
 - The status codes: 401 on a scope not granted, 403 without membership, 429
   with or without `Retry-After`.
+- [ ] r3 mineurs : tester le câblage de index.js (R9) ; borner le test d'arrêt pour qu'il échoue avant les 60 s du lanceur.
