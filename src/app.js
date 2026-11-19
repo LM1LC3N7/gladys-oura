@@ -116,6 +116,8 @@ export class OuraApp {
     this.sessionFailures = 0;
     /** The container stopped (shutdown): no timer, no request any more. */
     this.closed = false;
+    /** The container is stopping (shutdown started): no renewal leaves any more. */
+    this.closing = false;
     /** Moved on by every sign-in and every start: an answer of before is dropped. */
     this.epoch = 0;
     this.generation = 0;
@@ -259,6 +261,7 @@ export class OuraApp {
    * most `limit` (Docker kills after 10 s); then no timer nor request.
    */
   async shutdown(limit = TIMINGS.shutdownWait) {
+    this.closing = true;
     this.stop();
     let timer;
     const late = new Promise((resolve) => {
@@ -671,6 +674,10 @@ export class OuraApp {
       const current = this.stored;
       return !current || current.client !== s.client || current.refreshToken !== s.refreshToken;
     };
+    if (this.closing) {
+      // The container stops: its token could not be kept (a read in flight got a 401).
+      throw new OuraError('renew_wait', 'the integration is stopping');
+    }
     let token;
     try {
       token = await tokenRequest(

@@ -1486,3 +1486,31 @@ test('a save that succeeds clears the retry timer and the backoff (N11, N12)', a
   assert.equal(refuse.calls, calls + 1, 'tried again after 10 s');
   assert.equal(gladys.fake.config.session.accessToken, 'access-X');
 });
+
+test('a 401 on a read in flight during the shutdown never starts a renewal', async (t) => {
+  const refuse = { on: false };
+  const server = fakeOura();
+  const { app, advance } = await setup(t, { server, refuse });
+  let release;
+  server.queue('daily_sleep', () => new Promise((resolve) => (release = resolve)));
+  await advance(31 * MINUTE, MINUTE);
+  assert.ok(release, 'read in flight');
+  // A session write in flight: the shutdown waits for it, the witness write passes.
+  let written;
+  refuse.before = () => {
+    refuse.before = undefined;
+    return new Promise((resolve) => (written = resolve));
+  };
+  const writing = app.saveSession({ witness: true });
+  await settle();
+  const stopping = app.shutdown();
+  await settle();
+  release(answer(401, { detail: 'Unauthorized' }));
+  await settle();
+  written();
+  await writing;
+  await stopping;
+  await advance(10 * MINUTE, MINUTE);
+  const renewals = server.of('token').filter((r) => r.form.grant_type === 'refresh_token');
+  assert.equal(renewals.length, 0, 'no renewal token consumed while stopping');
+});
