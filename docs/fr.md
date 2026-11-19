@@ -158,8 +158,10 @@ publiées sans date, déclenchent les scènes comme d’habitude).
 - **Non lu cette fois : SpO2…** : une collection a été refusée (autorisation
   non accordée, bague sans cette fonction) ou a échoué ; les autres sont
   publiées.
-- Un redémarrage du conteneur, ou une réponse d’Oura arrivée trop tard, dans
-  les secondes mêmes d’un renouvellement peut perdre le nouveau jeton de
+- L’arrêt du conteneur attend jusqu’à 8 secondes un renouvellement en cours
+  et son enregistrement. Un plantage ou un arrêt forcé du conteneur, ou une
+  réponse d’Oura arrivée trop tard, dans les secondes mêmes d’un
+  renouvellement peut perdre le nouveau jeton de
   renouvellement (il ne sert qu’une fois) : l’état devient alors **Session
   terminée** ; cliquez sur Connecter. Rare, inhérent aux jetons à usage
   unique.

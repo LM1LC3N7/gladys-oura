@@ -83,6 +83,8 @@ export const TIMINGS = {
   renewFloor: MINUTE,
   /** A session Gladys did not keep: saved again after 10 s, then every 10 s to 1 min. */
   sessionRetry: [10 * SECOND, 10 * SECOND, 10 * SECOND, 30 * SECOND, MINUTE],
+  /** The container stops: a renewal in flight and its save are waited for this long at most. */
+  shutdownWait: 8 * SECOND,
   /** Gladys cannot keep a new token: no renewal sent, tried again after this. */
   gladysWait: MINUTE,
   /** A renewal that did not reach Oura: tried again after 1, 5, 15, then 60 minutes. */

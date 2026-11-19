@@ -117,7 +117,10 @@ up to date at the end of every milestone.
   in 1 min, not counted as a failure); the renewed token is saved before it is
   used; a failed save is retried by a timer (10 s, 10 s, 10 s, 30 s, then
   every minute), at each reconnection and before each read, and blocks any
-  other renewal (review r1). Tokens of an older `/data` (`session`) are moved to Gladys at
+  other renewal (review r1). A refused witness write waits a minute (no
+  loop). `stop()` leaves no session timer (a write in flight that fails after
+  it arms nothing); `shutdown()` (index.js) waits for a renewal in flight and
+  the session writes, 8 s at most, then nothing runs (review r2). Tokens of an older `/data` (`session`) are moved to Gladys at
   start when Gladys holds none (never over a session of Gladys), then
   removed; refused, they stay in `/data` (`legacySession`) and still serve.
   Known limit, exactly: Gladys accepts the witness write, Oura renews, Gladys

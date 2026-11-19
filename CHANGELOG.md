@@ -18,7 +18,8 @@ the notes of the version's GitHub Release.
   renewal is sent only while Gladys is connected and has just accepted a
   write of the session, the renewed token is saved in Gladys before it is
   used, and a failed save is tried again within seconds and at each
-  reconnection, with no other renewal before.
+  reconnection, with no other renewal before. Stopping the container waits
+  up to 8 s for a renewal in flight and its save.
 
 ## [0.1.2] - 2026-10-23
 

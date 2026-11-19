@@ -71,6 +71,8 @@ async function setup(
   // `refuse.on`: Gladys refuses setConfig (the tokens are not kept there).
   const setConfig = gladys.setConfig.bind(gladys);
   gladys.setConfig = async (values) => {
+    // Every write tried, accepted or not.
+    refuse.calls = (refuse.calls ?? 0) + 1;
     if (refuse.on) {
       throw Object.assign(new Error('Service Unavailable'), { status: 503 });
     }
@@ -1307,4 +1309,180 @@ test('a refused renewal drops the tokens from Gladys too; a restart stays stoppe
   await advance(22 * MINUTE, MINUTE);
   assert.equal(gladys.fake.config.session, '');
   assert.equal(app.session, null);
+});
+
+test('no renewal loop while Gladys refuses or is away: one witness write a minute, nothing sent to Oura', async (t) => {
+  const logs = [];
+  const refuse = { on: false };
+  const server = fakeOura({ expiresIn: 1800 });
+  const { gladys, advance } = await setup(t, { server, logs, refuse });
+  await advance(19 * MINUTE, MINUTE);
+  refuse.on = true;
+  const calls = refuse.calls;
+  const lines = logs.length;
+  // 5 minutes in the renewal window (renewal due at 20 min), Gladys refusing.
+  await advance(5 * MINUTE, SECOND);
+  assert.ok(
+    refuse.calls - calls >= 3 && refuse.calls - calls <= 6,
+    `${refuse.calls - calls} writes`,
+  );
+  assert.ok(logs.length - lines <= 12, `${logs.length - lines} log lines`);
+  // 5 minutes more, Gladys away: not even a write.
+  refuse.on = false;
+  gladys.connected = false;
+  const away = refuse.calls;
+  const awayLines = logs.length;
+  await advance(5 * MINUTE, SECOND);
+  assert.equal(refuse.calls, away, 'no write while Gladys is away');
+  assert.ok(logs.length - awayLines <= 6, `${logs.length - awayLines} log lines`);
+  assert.equal(server.of('token').length, 1, 'no renewal sent');
+  gladys.connected = true;
+  await advance(2 * MINUTE, SECOND);
+  assert.equal(server.of('token').length, 2, 'renewed once Gladys is back');
+});
+
+test('stop(): no session timer nor write afterwards, even when a write in flight fails after it', async (t) => {
+  const refuse = { on: false };
+  const server = fakeOura({ expiresIn: 1800 });
+  const { app, advance } = await setup(t, { server, refuse });
+  refuse.before = (values) => {
+    if (values.session?.refreshToken === 'refresh-2') {
+      throw Object.assign(new Error('Service Unavailable'), { status: 503 });
+    }
+  };
+  await advance(21 * MINUTE, MINUTE);
+  assert.equal(app.sessionPending, true);
+  assert.ok(app.sessionTimer, 'retry armed');
+  // A write in flight at stop(), refused after it.
+  let release;
+  refuse.before = (values) =>
+    new Promise((resolve, reject) => {
+      release = () => reject(Object.assign(new Error('Service Unavailable'), { status: 503 }));
+      void values;
+    });
+  const writing = app.saveSession();
+  await settle();
+  app.stop();
+  assert.equal(app.sessionTimer, undefined, 'stop() clears the retry timer');
+  release();
+  assert.equal(await writing, false);
+  assert.equal(app.sessionTimer, undefined, 'a failure after stop() arms nothing');
+  const calls = refuse.calls;
+  await advance(5 * MINUTE, 5 * SECOND);
+  assert.equal(refuse.calls, calls, 'no write after stop()');
+});
+
+test('shutdown waits for a renewal in flight and saves its token, bounded; then nothing runs', async (t) => {
+  const refuse = { on: false };
+  const server = fakeOura({ expiresIn: 1800 });
+  const { gladys, app, advance } = await setup(t, { server, refuse });
+  let release;
+  server.queue(
+    'token',
+    (req) =>
+      new Promise((resolve) => {
+        release = () => {
+          server.used.add(req.form.refresh_token);
+          resolve(server.issue());
+        };
+      }),
+  );
+  await advance(20 * MINUTE + 30 * SECOND, 10 * SECOND);
+  assert.ok(release, 'renewal in flight');
+  let finished = false;
+  const stopping = app.shutdown().then(() => (finished = true));
+  await settle();
+  assert.equal(finished, false, 'waits for the renewal');
+  release();
+  await stopping;
+  assert.equal(gladys.fake.config.session.refreshToken, 'refresh-2', 'the new token is kept');
+  const calls = refuse.calls;
+  const requests = server.requests.length;
+  await advance(2 * HOUR, MINUTE);
+  assert.equal(refuse.calls, calls);
+  assert.equal(server.requests.length, requests, 'nothing after the shutdown');
+
+  // A renewal that never answers: the shutdown ends after 8 s anyway.
+  // Asked after the shutdown: nothing written.
+  app.sessionPending = true;
+  assert.equal(await app.saveSession(), false);
+  assert.equal(refuse.calls, calls, 'no write after the shutdown');
+
+  // A renewal that answers too late: the shutdown ends after 8 s, nothing runs afterwards.
+  const late = fakeOura({ expiresIn: 1800 });
+  const other = await setup(t, { server: late, mock: false });
+  let answer8;
+  late.queue('token', () => new Promise((resolve) => (answer8 = () => resolve(late.issue()))));
+  await other.advance(21 * MINUTE, 10 * SECOND);
+  assert.ok(answer8, 'renewal in flight');
+  let done = false;
+  const bounded = other.app.shutdown().then(() => (done = true));
+  await other.advance(7 * SECOND, SECOND);
+  assert.equal(done, false);
+  await other.advance(2 * SECOND, SECOND);
+  await bounded;
+  assert.equal(done, true);
+  answer8();
+  await settle();
+  assert.equal(other.app.renewTimer, undefined, 'no renewal timer after the shutdown');
+  assert.equal(other.app.timer, undefined, 'no read timer after the shutdown');
+  const sent = late.requests.length;
+  await other.advance(2 * HOUR, MINUTE);
+  assert.equal(late.requests.length, sent, 'no renewal timer nor read after the shutdown');
+});
+
+test('a sign-in during the witness write: the old session is not renewed (N10)', async (t) => {
+  const refuse = { on: false };
+  const server = fakeOura({ expiresIn: 1800 });
+  const { gladys, app, advance, connect } = await setup(t, { server, refuse });
+  await advance(2 * MINUTE, MINUTE);
+  let release;
+  refuse.before = (values) => {
+    if (values.session?.refreshToken === 'refresh-1') {
+      refuse.before = undefined;
+      return new Promise((resolve) => (release = resolve));
+    }
+    return undefined;
+  };
+  const renewal = app.renew();
+  await settle();
+  assert.ok(release, 'witness write held');
+  const back = await connect();
+  const signing = gladys.fake.oauthCallback(OAUTH_FIELD, back);
+  await settle();
+  assert.equal(app.session.refreshToken, 'refresh-2', 'the new sign-in holds');
+  release();
+  await assert.rejects(renewal, (err) => err.kind === 'renew_wait');
+  await signing;
+  const renewals = server.of('token').filter((r) => r.form.grant_type === 'refresh_token');
+  assert.equal(renewals.length, 0, 'the replaced session is never renewed');
+});
+
+test('a save that succeeds clears the retry timer and the backoff (N11, N12)', async (t) => {
+  const refuse = { on: false };
+  const server = fakeOura({ expiresIn: 1800 });
+  const { gladys, app, advance } = await setup(t, { server, refuse });
+  refuse.before = (values) => {
+    if (values.session?.refreshToken === 'refresh-2') {
+      throw Object.assign(new Error('Service Unavailable'), { status: 503 });
+    }
+  };
+  await advance(21 * MINUTE, MINUTE);
+  // Five failures: the next try is a minute away.
+  await advance(2 * MINUTE, 5 * SECOND);
+  assert.ok(app.sessionFailures >= 5);
+  refuse.before = undefined;
+  await gladys.disconnect();
+  await gladys.connect();
+  await settle();
+  assert.equal(app.sessionPending, false);
+  assert.equal(app.sessionTimer, undefined, 'no timer left after the save');
+  // A new failure starts again at 10 s.
+  refuse.on = true;
+  await app.setSession({ ...app.session, accessToken: 'access-X' });
+  refuse.on = false;
+  const calls = refuse.calls;
+  await advance(15 * SECOND, 5 * SECOND);
+  assert.equal(refuse.calls, calls + 1, 'tried again after 10 s');
+  assert.equal(gladys.fake.config.session.accessToken, 'access-X');
 });

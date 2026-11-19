@@ -14,7 +14,8 @@ const gladys = new GladysIntegration();
 const app = new OuraApp({ gladys });
 
 registerHandlers(gladys, app, logger);
-gladys.handleShutdown(() => app.stop());
+// The stop waits for a renewal in flight and its save (8 s at most): a renewal token serves once.
+gladys.handleShutdown(() => app.shutdown());
 
 logger.info('Starting the Oura integration...');
 gladys.connect().catch((err) => {

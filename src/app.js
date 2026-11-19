@@ -114,6 +114,8 @@ export class OuraApp {
     this.sessionChain = Promise.resolve();
     this.sessionTimer = undefined;
     this.sessionFailures = 0;
+    /** The container stopped (shutdown): no timer, no request any more. */
+    this.closed = false;
     /** Moved on by every sign-in and every start: an answer of before is dropped. */
     this.epoch = 0;
     this.generation = 0;
@@ -251,6 +253,27 @@ export class OuraApp {
     this.publisher.stop();
   }
 
+  /**
+   * The container stops: nothing new starts, a renewal in flight and the
+   * session writes asked are waited for (a new renewal token is kept), at
+   * most `limit` (Docker kills after 10 s); then no timer nor request.
+   */
+  async shutdown(limit = TIMINGS.shutdownWait) {
+    this.stop();
+    let timer;
+    const late = new Promise((resolve) => {
+      timer = this.timers.setTimeout(resolve, limit);
+    });
+    const done = (async () => {
+      await this.renewing?.catch(() => {});
+      await this.sessionChain;
+    })();
+    await Promise.race([done, late]);
+    this.timers.clearTimeout(timer);
+    this.closed = true;
+    this.stop();
+  }
+
   clearTimer() {
     if (this.timer) {
       this.timers.clearTimeout(this.timer);
@@ -303,19 +326,24 @@ export class OuraApp {
    * renewal is sent only once Gladys just accepted a write).
    */
   saveSession({ witness = false } = {}) {
-    const link = this.sessionChain.then(() => this.writeSession(witness));
+    // A write asked before a stop() still leaves, but its failure arms no timer.
+    const generation = this.generation;
+    const link = this.sessionChain.then(() => this.writeSession(witness, generation));
     this.sessionChain = link.catch(() => {});
     return link;
   }
 
-  async writeSession(witness) {
+  async writeSession(witness, generation) {
+    if (this.closed) {
+      return false;
+    }
     if (this.sessionPending || witness) {
       const value = this.stored;
       try {
         await this.gladys.setConfig({ [SESSION_KEY]: value ?? '' });
       } catch (err) {
         this.logger.warn(`Oura: tokens not saved in Gladys (${err?.status ?? 'error'})`);
-        if (this.sessionPending) {
+        if (this.sessionPending && generation === this.generation) {
           this.scheduleSessionSave();
         }
         return false;
@@ -338,6 +366,9 @@ export class OuraApp {
   /** A failed save of the session: tried again after 10 s, then at most every minute. */
   scheduleSessionSave() {
     this.clearSessionTimer();
+    if (this.closed) {
+      return;
+    }
     const delay =
       TIMINGS.sessionRetry[Math.min(this.sessionFailures, TIMINGS.sessionRetry.length - 1)];
     this.sessionFailures += 1;
@@ -545,7 +576,7 @@ export class OuraApp {
   scheduleRenew() {
     this.clearRenewTimer();
     const s = this.session;
-    if (!s || PERSISTED.has(this.blocked)) {
+    if (!s || PERSISTED.has(this.blocked) || this.closed) {
       return;
     }
     const lifetime = Math.max(0, s.expiresAt - s.obtainedAt);
@@ -772,6 +803,9 @@ export class OuraApp {
   /** The next read at `at`. */
   scheduleAt(at) {
     this.clearTimer();
+    if (this.closed) {
+      return;
+    }
     const delay = at - this.now();
     const generation = this.generation;
     this.timer = this.timers.setTimeout(

@@ -83,7 +83,9 @@ test/helpers/       a fake Oura behind the transport; Gladys is the SDK's fake
   time. A renewal only while Gladys is connected and right after a write of
   the current session succeeded; the new token is saved before it is used; a
   failed save is retried by a short timer (10 s to 1 min), at each
-  reconnection and before each read, and blocks any other renewal. An older `/data` session
+  reconnection and before each read, and blocks any other renewal. The
+  container stop (`shutdown()`) waits for a renewal in flight and its save,
+  8 s at most; afterwards no timer nor request. An older `/data` session
   moves to Gladys at start (never over one Gladys holds) and stays in `/data`
   until Gladys accepted it.
 - **Rate limits**: never read sooner than the interval (test button, scan,

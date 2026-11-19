@@ -135,8 +135,9 @@ features, published without a date, trigger scenes as usual).
   read again after 6 hours.
 - **Not read this time: SpO2…**: one collection was refused (scope not
   granted, ring without that feature) or failed; the others are published.
-- A restart of the container, or an answer of Oura arriving too late, in the
-  very seconds of a renewal can lose the new renewal token (it serves once):
+- A stop of the container waits up to 8 seconds for a renewal in flight and
+  its save. A crash or a kill of the container, or an answer of Oura arriving
+  too late, in the very seconds of a renewal can lose the new renewal token (it serves once):
   the status then becomes **Session ended**; click Connect. Rare, inherent to
   single-use renewal tokens.
 - A renewal is sent only while Gladys is connected and has just accepted a
