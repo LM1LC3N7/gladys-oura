@@ -111,12 +111,18 @@ up to date at the end of every milestone.
 - **Tokens in Gladys, never in `/data`** (rule of the brief): saved by
   `setConfig({ session })` (key outside the schema, never sent to the front),
   read once at the first start (afterwards the process holds the truth);
-  a renewed token is saved before it is used, a failed save is retried at
-  each read. Tokens of an older `/data` (`session`) are moved to Gladys at
+  writes go one at a time through a queue (each sends the session of the
+  moment). A renewal is sent only while `gladys.connected` and right after a
+  witness write of the current session succeeded (else nothing sent, retried
+  in 1 min, not counted as a failure); the renewed token is saved before it is
+  used; a failed save is retried by a timer (10 s, 10 s, 10 s, 30 s, then
+  every minute), at each reconnection and before each read, and blocks any
+  other renewal (review r1). Tokens of an older `/data` (`session`) are moved to Gladys at
   start when Gladys holds none (never over a session of Gladys), then
   removed; refused, they stay in `/data` (`legacySession`) and still serve.
-  Known limit: a restart while Gladys refuses a renewed token loses it
-  (single use), then **Session ended**.
+  Known limit, exactly: Gladys accepts the witness write, Oura renews, Gladys
+  refuses the new token (fraction of a second later), and the container
+  restarts before a retry succeeds: the new token is lost, **Session ended**.
 - **The OAuth return is acked once the session save in Gladys was tried**; Discovery,
   status and the read follow without being waited for (Gladys cuts at 5 s).
   "Test Oura" has 120 s: 9 requests of 8 s at most.

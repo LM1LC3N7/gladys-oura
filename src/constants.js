@@ -81,6 +81,10 @@ export const TIMINGS = {
   tokenMargin: 10 * MINUTE,
   /** Never two renewals within a minute (a token shorter than the margin, a clock ahead). */
   renewFloor: MINUTE,
+  /** A session Gladys did not keep: saved again after 10 s, then every 10 s to 1 min. */
+  sessionRetry: [10 * SECOND, 10 * SECOND, 10 * SECOND, 30 * SECOND, MINUTE],
+  /** Gladys cannot keep a new token: no renewal sent, tried again after this. */
+  gladysWait: MINUTE,
   /** A renewal that did not reach Oura: tried again after 1, 5, 15, then 60 minutes. */
   renewRetry: [MINUTE, 5 * MINUTE, 15 * MINUTE, HOUR],
   /** Without an expiry in the answer, the token is renewed after this. */

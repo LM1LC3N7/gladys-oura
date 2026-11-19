@@ -162,9 +162,16 @@ publiées sans date, déclenchent les scènes comme d’habitude).
   les secondes mêmes d’un renouvellement peut perdre le nouveau jeton de
   renouvellement (il ne sert qu’une fois) : l’état devient alors **Session
   terminée** ; cliquez sur Connecter. Rare, inhérent aux jetons à usage
-  unique. Il en va de même quand Gladys n’a pas pu garder un jeton renouvelé
-  (les journaux disent « tokens not saved in Gladys », réessayé à chaque
-  lecture) et que le conteneur redémarre avant que ce soit fait.
+  unique.
+- Un renouvellement ne part que si Gladys est connecté et vient d’accepter
+  une écriture de la session en cours ; sinon le jeton en cours reste et le
+  renouvellement est retenté une minute plus tard (les journaux disent
+  « Gladys cannot keep the tokens »). Si Gladys refuse le nouveau jeton juste
+  après (les journaux disent « tokens not saved in Gladys »), il est
+  réenregistré toutes les 10 secondes à une minute et à chaque reconnexion à
+  Gladys, et aucun autre renouvellement ne part avant. Seul un redémarrage du
+  conteneur avant que l’un de ces enregistrements réussisse le perd :
+  **Session terminée**, cliquez sur Connecter.
 
 ## Confidentialité
 
@@ -179,7 +186,8 @@ publiées sans date, déclenchent les scènes comme d’habitude).
   démarrage, ils sont déplacés dans Gladys, puis retirés de `/data` (une
   session que Gladys détient déjà n’est jamais remplacée par eux). Si Gladys
   les refuse, ils restent dans `/data` et servent toujours, et le déplacement
-  est réessayé à chaque lecture et à chaque démarrage ; rien à faire. Seulement
+  est réessayé en quelques secondes, à chaque reconnexion, lecture et
+  démarrage ; rien à faire. Seulement
   si cela échoue durablement (voir les journaux), cliquez sur Connecter.
 - Retirez l’accès quand vous voulez dans votre compte Oura (applications
   autorisées) ou en supprimant l’application sur le portail développeur.

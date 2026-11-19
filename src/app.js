@@ -108,8 +108,12 @@ export class OuraApp {
     /** The tokens: in memory, saved in the configuration of Gladys, never in /data. */
     this.stored = null;
     this.sessionLoaded = false;
-    /** Tokens not saved in Gladys yet (a failed setConfig): saved again at the next read. */
+    /** Tokens not saved in Gladys yet (a failed setConfig): saved again soon (short timer). */
     this.sessionPending = false;
+    /** The writes of the session to Gladys, one at a time (never an older value last). */
+    this.sessionChain = Promise.resolve();
+    this.sessionTimer = undefined;
+    this.sessionFailures = 0;
     /** Moved on by every sign-in and every start: an answer of before is dropped. */
     this.epoch = 0;
     this.generation = 0;
@@ -181,6 +185,10 @@ export class OuraApp {
       this.sessionLoaded = true;
     }
     await this.migrateTokens();
+    if (this.sessionPending) {
+      // Not saved before this start (stop() cleared its timer): tried again soon.
+      this.scheduleSessionSave();
+    }
     const pause = this.memory.pause;
     if (pause && pause.until > Math.max(this.now(), this.pausedUntil)) {
       this.pausedUntil = pause.until;
@@ -239,6 +247,7 @@ export class OuraApp {
     this.generation += 1;
     this.clearTimer();
     this.clearRenewTimer();
+    this.clearSessionTimer();
     this.publisher.stop();
   }
 
@@ -266,7 +275,7 @@ export class OuraApp {
    * Tokens an older /data held: moved to the configuration of Gladys when it
    * holds none (a session of Gladys is never overwritten by them), then
    * removed from /data once Gladys kept them; refused, they stay in /data
-   * until a later save succeeds (the next read or the next start).
+   * until a later save succeeds (short timer, reconnection, read, start).
    */
   async migrateTokens() {
     if (!this.memory.legacySession) {
@@ -286,18 +295,36 @@ export class OuraApp {
     return this.saveSession();
   }
 
-  /** Saves the tokens in the configuration of Gladys; false when it failed (tried again later). */
-  async saveSession() {
-    if (this.sessionPending) {
+  /**
+   * Saves the tokens in the configuration of Gladys; false when it failed
+   * (tried again by a short timer). One write at a time: each sends the
+   * session of the moment it leaves, so an older value is never written last.
+   * `witness`: the current session is written even when Gladys has it (a
+   * renewal is sent only once Gladys just accepted a write).
+   */
+  saveSession({ witness = false } = {}) {
+    const link = this.sessionChain.then(() => this.writeSession(witness));
+    this.sessionChain = link.catch(() => {});
+    return link;
+  }
+
+  async writeSession(witness) {
+    if (this.sessionPending || witness) {
       const value = this.stored;
       try {
         await this.gladys.setConfig({ [SESSION_KEY]: value ?? '' });
       } catch (err) {
         this.logger.warn(`Oura: tokens not saved in Gladys (${err?.status ?? 'error'})`);
+        if (this.sessionPending) {
+          this.scheduleSessionSave();
+        }
         return false;
       }
+      // A newer session set meanwhile stays to save (its own write follows).
       if (this.stored === value) {
         this.sessionPending = false;
+        this.sessionFailures = 0;
+        this.clearSessionTimer();
       }
     }
     if (this.memory.legacySession) {
@@ -306,6 +333,25 @@ export class OuraApp {
       await this.saveMemory();
     }
     return true;
+  }
+
+  /** A failed save of the session: tried again after 10 s, then at most every minute. */
+  scheduleSessionSave() {
+    this.clearSessionTimer();
+    const delay =
+      TIMINGS.sessionRetry[Math.min(this.sessionFailures, TIMINGS.sessionRetry.length - 1)];
+    this.sessionFailures += 1;
+    this.sessionTimer = this.timers.setTimeout(() => {
+      this.sessionTimer = undefined;
+      this.saveSession().catch(() => {});
+    }, delay);
+  }
+
+  clearSessionTimer() {
+    if (this.sessionTimer) {
+      this.timers.clearTimeout(this.sessionTimer);
+      this.sessionTimer = undefined;
+    }
   }
 
   /** The keys of a token request; `endpoint`: the one of the session for a renewal. */
@@ -331,6 +377,8 @@ export class OuraApp {
       await this.start(raw);
       return;
     }
+    // Gladys is back: tokens it did not keep are saved first.
+    await this.saveSession();
     await this.configUpdated(raw);
     this.published = undefined;
     this.badges = new Map();
@@ -570,6 +618,17 @@ export class OuraApp {
       // Nothing sent: the pause already running is neither extended nor restarted.
       throw new OuraError('paused', 'paused');
     }
+    // Renewal tokens serve once: never a renewal Gladys could not keep. The
+    // session is written first (the pending one, or the current one again);
+    // refused or Gladys not connected, nothing is sent and the token stays.
+    if (!this.gladys.connected || !(await this.saveSession({ witness: true }))) {
+      this.renewRetryAt = this.now() + TIMINGS.gladysWait;
+      this.renewError = new OuraError('gladys', 'Gladys cannot keep the tokens');
+      throw new OuraError('renew_wait', 'Gladys cannot keep the tokens');
+    }
+    if (s !== this.session) {
+      throw new OuraError('renew_wait', 'a new sign-in replaced the session');
+    }
     const epoch = this.epoch;
     // Kept before the request: a restart during it never renews within a minute.
     this.memory.lastRenewAt = now;
@@ -610,7 +669,7 @@ export class OuraApp {
       return;
     }
     // Oura's renewal tokens serve once: the new one is kept at once.
-    // Saved in Gladys before it is used (a failed save is tried again at each read).
+    // Saved in Gladys before it is used (a failed save is tried again within seconds).
     await this.setSession({
       client: s.client,
       ...token,
@@ -1268,7 +1327,7 @@ export class OuraApp {
       this.memory.pause = null;
     }
     await this.saveMemory();
-    // A failed save keeps the tokens in memory, saved again at the next read.
+    // A failed save keeps the tokens in memory, saved again within seconds.
     await this.saveSession();
     this.logger.info('Oura: authorized');
     // One read now, unless one ran less than the interval ago (then at its time).

@@ -79,8 +79,11 @@ test/helpers/       a fake Oura behind the transport; Gladys is the SDK's fake
   renewed at the endpoint that issued it. Never both token endpoints.
 - **Tokens in the configuration of Gladys only** (`setConfig`, key `session`
   outside the config_schema, never sent to the front), never in `/data`, a
-  log or a status. Read once at the first start; saved before a renewed token
-  is used; a failed save is retried at each read. An older `/data` session
+  log or a status. Read once at the first start; writes queued, one at a
+  time. A renewal only while Gladys is connected and right after a write of
+  the current session succeeded; the new token is saved before it is used; a
+  failed save is retried by a short timer (10 s to 1 min), at each
+  reconnection and before each read, and blocks any other renewal. An older `/data` session
   moves to Gladys at start (never over one Gladys holds) and stays in `/data`
   until Gladys accepted it.
 - **Rate limits**: never read sooner than the interval (test button, scan,

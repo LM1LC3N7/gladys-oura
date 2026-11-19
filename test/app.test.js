@@ -74,6 +74,8 @@ async function setup(
     if (refuse.on) {
       throw Object.assign(new Error('Service Unavailable'), { status: 503 });
     }
+    // `refuse.before`: may hold or refuse one write.
+    await refuse.before?.(values);
     return setConfig(values);
   };
   const app = new OuraApp({
@@ -1118,31 +1120,28 @@ test('Gladys refuses the migrated tokens: kept in /data across a restart, saved 
   }
 });
 
-test('a renewed token Gladys refuses: used at once, saved at a later read, kept across a restart', async (t) => {
+test('Gladys refusing writes or away: no renewal sent, the token stays; renewed once Gladys accepts', async (t) => {
   const logs = [];
   const refuse = { on: false };
   const store = memoryStore();
   const server = fakeOura({ expiresIn: 1800 });
   const { gladys, app, advance } = await setup(t, { server, store, logs, refuse });
-  assert.equal(gladys.fake.config.session.refreshToken, 'refresh-1');
   refuse.on = true;
-  await advance(21 * MINUTE, MINUTE);
-  assert.equal(server.of('token').length, 2, 'renewed');
-  assert.equal(gladys.fake.config.session.refreshToken, 'refresh-1', 'refused by Gladys');
-  assert.equal(app.session.refreshToken, 'refresh-2', 'kept in memory');
-  // The read uses the renewed token, and tries the save again first.
-  await advance(10 * MINUTE, MINUTE);
-  assert.equal(server.apiRequests.at(-1).headers.Authorization, 'Bearer access-2');
-  const warned = logs.filter((l) => /tokens not saved in Gladys/.test(l)).length;
-  assert.ok(warned >= 2, 'tried again at the read');
-  assert.equal(gladys.fake.config.session.refreshToken, 'refresh-1');
+  await advance(25 * MINUTE, MINUTE);
+  assert.equal(server.of('token').length, 1, 'no renewal Gladys could not keep');
+  assert.equal(server.used.size, 0, 'refresh-1 never consumed');
+  assert.equal(app.session.refreshToken, 'refresh-1');
+  assert.equal(app.renewFailures, 0, 'not counted as a renewal failure');
+  // Gladys away (WebSocket down): nothing sent either, even if setConfig answered.
   refuse.on = false;
-  await advance(31 * MINUTE, MINUTE);
-  assert.equal(gladys.fake.config.session.refreshToken, server.refresh);
-  assertNoToken(store, gladys, logs, server);
+  gladys.connected = false;
+  await advance(3 * MINUTE, MINUTE);
+  assert.equal(server.of('token').length, 1);
+  gladys.connected = true;
+  await advance(2 * MINUTE, 10 * SECOND);
+  assert.equal(server.of('token').length, 2, 'renewed once Gladys accepts');
+  assert.equal(gladys.fake.config.session.refreshToken, 'refresh-2');
   app.stop();
-
-  // A restart: the session of Gladys is the renewed one, the renewal goes on.
   const again = await setup(t, {
     server,
     store,
@@ -1151,15 +1150,142 @@ test('a renewed token Gladys refuses: used at once, saved at a later read, kept 
     mock: false,
     create: false,
   });
-  assert.equal(again.gladys.fake.connectionStatus.connected, true);
   await again.advance(40 * MINUTE, MINUTE);
-  assert.equal(store.data.block, null, 'no stop: the renewal token was the live one');
+  assert.equal(store.data.block, null, 'never "Session ended"');
   assert.equal(again.gladys.fake.connectionStatus.connected, true);
-  assert.equal(again.gladys.fake.config.session.refreshToken, server.refresh);
   assertNoToken(store, again.gladys, logs, server);
 });
 
-test('a sign-in Gladys cannot save: acked, read with the tokens, saved at a later read', async (t) => {
+test('a new token Gladys refuses after the witness write: no other renewal, saved at the reconnection, kept across a restart', async (t) => {
+  const logs = [];
+  const refuse = { on: false };
+  const store = memoryStore();
+  const server = fakeOura({ expiresIn: 1800 });
+  const { gladys, app, advance } = await setup(t, { server, store, logs, refuse });
+  // Only the save of the renewed token fails (the witness write of refresh-1 passes).
+  refuse.before = (values) => {
+    if (values.session?.refreshToken === 'refresh-2') {
+      throw Object.assign(new Error('Service Unavailable'), { status: 503 });
+    }
+  };
+  await advance(21 * MINUTE, MINUTE);
+  assert.equal(server.of('token').length, 2, 'renewed');
+  assert.equal(gladys.fake.config.session.refreshToken, 'refresh-1', 'refused by Gladys');
+  assert.equal(app.session.refreshToken, 'refresh-2', 'kept in memory');
+  assert.equal(app.sessionPending, true);
+  // Tried again within seconds, and no other renewal while it is not saved.
+  const warned = logs.filter((l) => /tokens not saved in Gladys/.test(l)).length;
+  await advance(2 * MINUTE, 5 * SECOND);
+  assert.ok(logs.filter((l) => /tokens not saved in Gladys/.test(l)).length >= warned + 3);
+  await assert.rejects(app.renew(), (err) => err.kind === 'renew_wait');
+  assert.equal(server.of('token').length, 2, 'never a renewal before the save');
+  // The read uses the renewed token.
+  await advance(10 * MINUTE, MINUTE);
+  assert.equal(server.apiRequests.at(-1).headers.Authorization, 'Bearer access-2');
+  // Gladys back (a reconnection): saved at once, without waiting for a timer.
+  refuse.before = undefined;
+  app.clearSessionTimer();
+  await gladys.disconnect();
+  await gladys.connect();
+  await settle();
+  assert.equal(gladys.fake.config.session.refreshToken, 'refresh-2');
+  assert.equal(app.sessionPending, false);
+  assertNoToken(store, gladys, logs, server);
+  app.stop();
+  const again = await setup(t, {
+    server,
+    store,
+    logs,
+    config: gladys.fake.config,
+    mock: false,
+    create: false,
+  });
+  await again.advance(40 * MINUTE, MINUTE);
+  assert.equal(store.data.block, null, 'never "Session ended"');
+  assert.equal(again.gladys.fake.connectionStatus.connected, true);
+});
+
+test('a token still to save: the retry timer survives a restart of the configuration, the read saves too', async (t) => {
+  const logs = [];
+  const refuse = { on: false };
+  const store = memoryStore();
+  const server = fakeOura({ expiresIn: 1800 });
+  const { gladys, app, advance } = await setup(t, { server, store, logs, refuse });
+  refuse.before = (values) => {
+    if (values.session?.refreshToken === 'refresh-2') {
+      throw Object.assign(new Error('Service Unavailable'), { status: 503 });
+    }
+  };
+  await advance(21 * MINUTE, MINUTE);
+  assert.equal(app.sessionPending, true);
+  // Another secret saved: start() again (its stop() clears the timer, start re-arms it).
+  await gladys.fake.configUpdated({ ...CONFIG, client_secret: 'other-secret-value' });
+  await settle();
+  refuse.before = undefined;
+  await advance(30 * SECOND, 5 * SECOND);
+  assert.equal(gladys.fake.config.session.refreshToken, 'refresh-2', 'saved by the timer');
+  await gladys.fake.configUpdated({ ...CONFIG });
+  await settle();
+
+  // Without a timer (cleared by hand), the next read saves it before reading.
+  // refresh-3 lives a day: no renewal before the read checked here.
+  server.expiresIn = 86400;
+  refuse.before = (values) => {
+    if (values.session?.refreshToken === 'refresh-3') {
+      throw Object.assign(new Error('Service Unavailable'), { status: 503 });
+    }
+  };
+  await advance(30 * MINUTE, MINUTE);
+  assert.equal(app.session.refreshToken, 'refresh-3');
+  assert.equal(app.sessionPending, true);
+  app.clearSessionTimer();
+  refuse.before = undefined;
+  const reads = server.apiRequests.length;
+  const renewals = server.of('token').length;
+  for (let i = 0; i < 40 && server.apiRequests.length === reads; i += 1) {
+    await advance(MINUTE, MINUTE);
+  }
+  assert.ok(server.apiRequests.length > reads, 'read');
+  assert.equal(server.of('token').length, renewals, 'no renewal saved it meanwhile');
+  assert.equal(gladys.fake.config.session.refreshToken, 'refresh-3', 'saved by the read');
+  assertNoToken(store, gladys, logs, server);
+});
+
+test('session writes go one at a time: a slow older write never wins, a newer value refused stays to save (M12)', async (t) => {
+  const refuse = { on: false };
+  const { gladys, app, advance } = await setup(t, { refuse });
+  const A = { ...app.session, accessToken: 'access-A' };
+  const B = { ...app.session, accessToken: 'access-B' };
+  const sent = [];
+  let release;
+  refuse.before = (values) => {
+    sent.push(values.session?.accessToken);
+    if (values.session?.accessToken === 'access-A') {
+      return new Promise((resolve) => (release = resolve));
+    }
+    if (values.session?.accessToken === 'access-B' && refuse.refuseB) {
+      throw Object.assign(new Error('Service Unavailable'), { status: 503 });
+    }
+    return undefined;
+  };
+  refuse.refuseB = true;
+  const a = app.setSession(A);
+  await settle();
+  const b = app.setSession(B);
+  await settle();
+  assert.deepEqual(sent, ['access-A'], 'B waits for A');
+  release();
+  assert.equal(await a, true);
+  assert.equal(await b, false);
+  assert.deepEqual(sent, ['access-A', 'access-B']);
+  assert.equal(app.sessionPending, true, 'B is still to save');
+  refuse.refuseB = false;
+  await advance(15 * SECOND, 5 * SECOND);
+  assert.equal(gladys.fake.config.session.accessToken, 'access-B');
+  assert.equal(app.sessionPending, false);
+});
+
+test('a sign-in Gladys cannot save: acked, read with the tokens, saved within seconds', async (t) => {
   const logs = [];
   const refuse = { on: true };
   const store = memoryStore();
