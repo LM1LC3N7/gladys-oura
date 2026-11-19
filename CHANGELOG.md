@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-19
+
 ### Security
 
 - The OAuth tokens are now kept by Gladys (in the configuration of the
@@ -50,6 +52,7 @@ the notes of the version's GitHub Release.
   the logs, the statuses nor `/data`.
 - Docs in English and French with the Oura app step by step, cover image.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-oura/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/LM1LC3N7/gladys-oura/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/LM1LC3N7/gladys-oura/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/LM1LC3N7/gladys-oura/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/LM1LC3N7/gladys-oura/releases/tag/v0.1.1
