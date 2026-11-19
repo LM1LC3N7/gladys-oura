@@ -10,6 +10,14 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Security
+
+- The OAuth tokens are now kept by Gladys (in the configuration of the
+  integration, never shown on the screen) instead of `/data`. Tokens of an
+  older `/data` are moved to Gladys at start, then removed from `/data`; a
+  renewed token is saved in Gladys before it is used, and a failed save is
+  tried again at each read.
+
 ## [0.1.2] - 2026-10-23
 
 ## [0.1.1] - 2026-10-21

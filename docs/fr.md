@@ -162,14 +162,24 @@ publiées sans date, déclenchent les scènes comme d’habitude).
   les secondes mêmes d’un renouvellement peut perdre le nouveau jeton de
   renouvellement (il ne sert qu’une fois) : l’état devient alors **Session
   terminée** ; cliquez sur Connecter. Rare, inhérent aux jetons à usage
-  unique.
+  unique. Il en va de même quand Gladys n’a pas pu garder un jeton renouvelé
+  (les journaux disent « tokens not saved in Gladys », réessayé à chaque
+  lecture) et que le conteneur redémarre avant que ce soit fait.
 
 ## Confidentialité
 
 - Lecture seule : l’intégration n’écrit jamais chez Oura.
 - Les valeurs de santé restent en mémoire et vont seulement à Gladys : jamais
   dans les journaux, jamais dans un message d’état, jamais dans `/data`.
-- Les jetons sont gardés en clair dans le volume `/data` de l’intégration
-  (lisible par son conteneur seulement), envoyés seulement à Oura.
+- Les jetons d’accès et de renouvellement sont gardés par Gladys dans sa base
+  (dans la configuration de l’intégration, jamais affichés à l’écran),
+  envoyés seulement à Oura, jamais dans `/data`, les journaux ni les messages
+  d’état. `/data` ne garde que des dates, des pauses et des arrêts.
+- Les versions 0.1.2 et antérieures gardaient les jetons dans `/data` : au
+  démarrage, ils sont déplacés dans Gladys, puis retirés de `/data` (une
+  session que Gladys détient déjà n’est jamais remplacée par eux). Si Gladys
+  les refuse, ils restent dans `/data` et servent toujours, et le déplacement
+  est réessayé à chaque lecture et à chaque démarrage ; rien à faire. Seulement
+  si cela échoue durablement (voir les journaux), cliquez sur Connecter.
 - Retirez l’accès quand vous voulez dans votre compte Oura (applications
   autorisées) ou en supprimant l’application sur le portail développeur.

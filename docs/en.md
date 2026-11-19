@@ -138,14 +138,23 @@ features, published without a date, trigger scenes as usual).
 - A restart of the container, or an answer of Oura arriving too late, in the
   very seconds of a renewal can lose the new renewal token (it serves once):
   the status then becomes **Session ended**; click Connect. Rare, inherent to
-  single-use renewal tokens.
+  single-use renewal tokens. The same happens when Gladys could not keep a
+  renewed token (the logs say "tokens not saved in Gladys", tried again at
+  each read) and the container restarts before it succeeds.
 
 ## Privacy
 
 - Read only: the integration never writes to Oura.
 - The health values stay in memory and go to Gladys only: never in the logs,
   never in a status message, never in `/data`.
-- The tokens are kept in clear in the `/data` volume of the integration
-  (readable by its container only), sent only to Oura.
+- The access and renewal tokens are kept by Gladys in its database (in the
+  configuration of the integration, never shown on the screen), sent only to
+  Oura, never in `/data`, the logs nor the status messages. `/data` keeps
+  only times, pauses and stops.
+- Version 0.1.2 and before kept the tokens in `/data`: at start they are
+  moved to Gladys, then removed from `/data` (a session Gladys already holds
+  is never replaced by them). If Gladys refuses them, they stay in `/data`
+  and still serve, and the move is tried again at each read and each start;
+  nothing to do. Only if it keeps failing (see the logs), click Connect.
 - Revoke the access at any time in your Oura account (authorized apps) or by
   deleting the application on the developer portal.

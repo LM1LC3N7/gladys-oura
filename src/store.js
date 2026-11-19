@@ -1,10 +1,7 @@
 // -----------------------------------------------------------------------------
 // What must survive a restart, in /data (the only writable place of the
 // container). Never a password (it is typed on the Oura page only), never
-// the client secret (kept by Gladys), never a health value:
-//   - the session: the access and renewal tokens with their ends, the client
-//     they belong to (a hash of the client id) and the token endpoint that
-//     issued them;
+// the client secret nor a token (kept by Gladys), never a health value:
 //   - a stop that only the user can lift (renewal refused, access refused
 //     with a new token), with its client, so a restart never retries it;
 //   - when the last cycle succeeded (a restart before the next read stays
@@ -14,8 +11,11 @@
 //     reads sooner);
 //   - when the token was last renewed (never two renewals within a minute);
 //   - the requests sent today (the daily budget).
-// The tokens are kept as Oura gives them, in clear, in a file readable by
-// the container user only (0600).
+// The session (the access and renewal tokens with their ends, the client they
+// belong to and the token endpoint that issued them) is kept in the
+// configuration of Gladys (setConfig, key `session` outside the config_schema,
+// never sent to the front), see src/app.js. Tokens an older version kept here
+// are read once (`legacySession`), moved to Gladys at start, then removed.
 // -----------------------------------------------------------------------------
 
 import { open, readFile, rename } from 'node:fs/promises';
@@ -72,8 +72,19 @@ export const PAUSES = {
   backoff: TIMINGS.backoffMax,
 };
 
-function session(raw) {
-  const s = raw?.session;
+/**
+ * A session (tokens) as kept in the configuration of Gladys (an object or its
+ * JSON text), or as an older version kept it in /data: repaired, or null.
+ */
+export function sessionOf(value) {
+  let s = value;
+  if (typeof s === 'string') {
+    try {
+      s = JSON.parse(s);
+    } catch {
+      return null;
+    }
+  }
   const owner = client(s?.client);
   const refreshToken = str(s?.refreshToken, LIMITS.tokenLength);
   if (!owner || !refreshToken) {
@@ -103,7 +114,9 @@ export function normalizeMemory(raw, now = Date.now()) {
   const lastSuccessAt = time(raw?.lastSuccessAt);
   const requests = raw?.requests;
   return {
-    session: session(raw),
+    // Tokens kept in /data by 0.1.2 and before (`session`), or still there because
+    // Gladys refused them (`legacySession`): moved to Gladys at start, then removed.
+    legacySession: sessionOf(raw?.legacySession) ?? sessionOf(raw?.session),
     block:
       BLOCKS.has(block?.kind) && client(block?.client)
         ? { kind: block.kind, client: block.client }

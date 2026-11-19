@@ -21,7 +21,8 @@ real account.**
 
 - **Authorization** on a click only (Connect, or a pasted return address),
   with a state that serves once; the password is typed on the Oura page only.
-- **Tokens** in `/data` (0600), renewed by a timer before their end, one
+- **Tokens** kept by Gladys (its configuration, outside the form; never in
+  `/data`), renewed by a timer before their end, one
   renewal at a time, never twice within a minute; a refused renewal is a stop
   kept in `/data`, never retried by itself.
 - **Reads**: every 30 minutes by default (15 to 240), 6 to 8 requests each,

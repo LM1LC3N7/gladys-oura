@@ -4,6 +4,7 @@
 
 import { createHash } from 'node:crypto';
 import { POLL_MINUTES, TOKEN_URLS } from './constants.js';
+import { sessionOf } from './store.js';
 
 /** Defaults, mirrored by the manifest (checked by test/manifest.test.js). */
 export const DEFAULTS = {
@@ -14,7 +15,10 @@ export const DEFAULTS = {
 
 export const LANGUAGES = ['fr', 'en'];
 
-/** A short hash of the client id: the session in /data and the device belong to it. */
+/** The key of the configuration of Gladys holding the tokens (outside the config_schema). */
+export const SESSION_KEY = 'session';
+
+/** A short hash of the client id: the session and the device belong to it. */
 export const clientKey = (clientId) =>
   createHash('sha256').update(`gladys-oura:client:${clientId}`).digest('hex').slice(0, 16);
 
@@ -64,5 +68,7 @@ export function normalizeConfig(raw = {}) {
     client: clientId ? clientKey(clientId) : '',
     pollMinutes: bounded(raw?.poll_minutes, POLL_MINUTES),
     language: LANGUAGES.includes(language) ? language : DEFAULTS.language,
+    // The tokens saved in Gladys (read once, at the first start).
+    stored: sessionOf(raw?.[SESSION_KEY]),
   };
 }

@@ -34,6 +34,11 @@ up to date at the end of every milestone.
       device before an authorization, an exact message after a sign-in, the
       OAuth ack without waiting for Discovery, heart rate pages kept, badge at
       a restart, 403 text, docs.
+- [x] **Tokens out of `/data`** (2026-11-19, patch): rule "no secret in
+      `/data`". The session is saved by `setConfig({ session })` (key outside
+      the config_schema, never sent to the front), as gladys-meeting-status.
+      Tests: migration, refused setConfig, restart, no token in /data, logs
+      nor statuses; mutants killed.
 - [ ] **Milestone 2 — real account**: run against a real account and ring
       (see "To check on a real account"), turn the answers (anonymized) into
       fixtures, fix what differs.
@@ -64,7 +69,7 @@ up to date at the end of every milestone.
   refuses; `api` refuses the codes of current apps and the refusal consumes
   the code. `api` stays as an option: the OpenAPI specification 1.41 and
   oura-ring still name it. Never both one after the other. A session keeps the
-  endpoint that issued it (in `/data`) and is renewed there; a new choice
+  endpoint that issued it (in the session kept by Gladys) and is renewed there; a new choice
   applies at the next Connect.
 - **Scopes `daily heartrate spo2`** only (names of the OpenAPI specification
   1.41; `spo2Daily` was the name up to 1.37, the HA integration moved to
@@ -103,7 +108,16 @@ up to date at the end of every milestone.
   drops an older one still waiting (review 2).
 - **Heart rate pages**: oldest first, three at most, `fields=timestamp,bpm`;
   a failing page keeps those already read (the sample keeps its own time).
-- **The OAuth return is acked once the session is in `/data`**; Discovery,
+- **Tokens in Gladys, never in `/data`** (rule of the brief): saved by
+  `setConfig({ session })` (key outside the schema, never sent to the front),
+  read once at the first start (afterwards the process holds the truth);
+  a renewed token is saved before it is used, a failed save is retried at
+  each read. Tokens of an older `/data` (`session`) are moved to Gladys at
+  start when Gladys holds none (never over a session of Gladys), then
+  removed; refused, they stay in `/data` (`legacySession`) and still serve.
+  Known limit: a restart while Gladys refuses a renewed token loses it
+  (single use), then **Session ended**.
+- **The OAuth return is acked once the session save in Gladys was tried**; Discovery,
   status and the read follow without being waited for (Gladys cuts at 5 s).
   "Test Oura" has 120 s: 9 requests of 8 s at most.
 - **A renewal answer is dropped only when the session was replaced** (a new

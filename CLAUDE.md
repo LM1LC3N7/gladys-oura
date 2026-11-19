@@ -46,7 +46,7 @@ src/http.js         the only network access (node:https, bounded), errors by sta
 src/model.js        answers -> values (pure): latest daily record, main sleep, heart rate
 src/devices.js      the device and its states (pure)
 src/publisher.js    states within 300/min, each record once (key value@day, bpm@time)
-src/store.js        /data/oura-state.json (0600): tokens, stop, pause, budget, times
+src/store.js        /data/oura-state.json (0600): stop, pause, budget, times (never a token)
 src/config.js       config_schema normalized, client key (hash of the client id)
 src/constants.js    endpoints, scopes, collections, manifest keys, limits, timings
 src/i18n.js         runtime texts, device and feature names (en/fr)
@@ -74,9 +74,15 @@ test/helpers/       a fake Oura behind the transport; Gladys is the SDK's fake
 - **Token renewal**: by a timer at the end minus min(10 min, half the
   lifetime), one at a time (joined), never twice within a minute (kept in
   `/data` before the request), never during a hard pause. Renewal tokens
-  serve once: the new one is saved at once, even across a restart (start()
-  waits for it; dropped only when the session was replaced). A session is
+  serve once: the new one is saved in Gladys at once, even across a restart
+  (start() waits for it; dropped only when the session was replaced). A session is
   renewed at the endpoint that issued it. Never both token endpoints.
+- **Tokens in the configuration of Gladys only** (`setConfig`, key `session`
+  outside the config_schema, never sent to the front), never in `/data`, a
+  log or a status. Read once at the first start; saved before a renewed token
+  is used; a failed save is retried at each read. An older `/data` session
+  moves to Gladys at start (never over one Gladys holds) and stays in `/data`
+  until Gladys accepted it.
 - **Rate limits**: never read sooner than the interval (test button, scan,
   `connected`, unchanged configuration, restart, sign-in); 429 / 5xx / budget
   pause every path, 403 pauses the reads, all kept in `/data`. A secondary

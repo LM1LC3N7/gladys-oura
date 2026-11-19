@@ -12,7 +12,9 @@
 // the start of the last cycle is kept in /data), two renewals at once, more
 // than LIMITS.dailyRequests requests a day. Pauses (429, 5xx, 403, daily
 // budget, errors) and stops are kept in /data; a reconnection to Gladys
-// resends the status and the Discovery list without touching them.
+// resends the status and the Discovery list without touching them. The
+// tokens live in the configuration of Gladys (setConfig, key `session`
+// outside the config_schema), never in /data, a log nor a status.
 //
 // Health data: read only, kept in memory only (never in /data), never in a
 // log nor a status message. Not a medical device.
@@ -20,7 +22,7 @@
 
 import { DEVICE_TRANSPORTS, createLogger } from '@gladysassistant/integration-sdk';
 import { getCollection, queryOf } from './api.js';
-import { normalizeConfig } from './config.js';
+import { SESSION_KEY, normalizeConfig } from './config.js';
 import { COLLECTIONS, DAY, LIMITS, MINUTE, PRIMARY, SECOND, TIMINGS } from './constants.js';
 import { buildDevice, deviceIds, deviceStates } from './devices.js';
 import { OuraError, errorReason, httpsTransport, networkError, safeCode } from './http.js';
@@ -103,6 +105,11 @@ export class OuraApp {
     this.signIns = new SignIns({ now });
     this.config = normalizeConfig();
     this.memory = normalizeMemory(null);
+    /** The tokens: in memory, saved in the configuration of Gladys, never in /data. */
+    this.stored = null;
+    this.sessionLoaded = false;
+    /** Tokens not saved in Gladys yet (a failed setConfig): saved again at the next read. */
+    this.sessionPending = false;
     /** Moved on by every sign-in and every start: an answer of before is dropped. */
     this.epoch = 0;
     this.generation = 0;
@@ -155,7 +162,7 @@ export class OuraApp {
     this.epoch += 1;
     await this.running;
     // A renewal in flight ends first: its new renewal token (they serve once) is
-    // kept in /data before /data is read again.
+    // kept (in memory, saved in Gladys) before /data is read again.
     await this.renewing?.catch(() => {});
     const previous = this.config.client;
     this.config = normalizeConfig(raw);
@@ -168,6 +175,12 @@ export class OuraApp {
     this.reset();
     this.signIns.clear();
     this.memory = normalizeMemory(await this.store.load().catch(() => null), this.now());
+    if (!this.sessionLoaded) {
+      // The tokens saved in Gladys are read once; afterwards this process holds the truth.
+      this.stored = this.config.stored;
+      this.sessionLoaded = true;
+    }
+    await this.migrateTokens();
     const pause = this.memory.pause;
     if (pause && pause.until > Math.max(this.now(), this.pausedUntil)) {
       this.pausedUntil = pause.until;
@@ -245,8 +258,54 @@ export class OuraApp {
 
   /** The session of the configured client, or null. */
   get session() {
-    const s = this.memory.session;
+    const s = this.stored;
     return s && s.client === this.config.client ? s : null;
+  }
+
+  /**
+   * Tokens an older /data held: moved to the configuration of Gladys when it
+   * holds none (a session of Gladys is never overwritten by them), then
+   * removed from /data once Gladys kept them; refused, they stay in /data
+   * until a later save succeeds (the next read or the next start).
+   */
+  async migrateTokens() {
+    if (!this.memory.legacySession) {
+      return;
+    }
+    if (!this.stored) {
+      this.stored = this.memory.legacySession;
+      this.sessionPending = true;
+    }
+    await this.saveSession();
+  }
+
+  /** New tokens (or none): in memory at once, then saved in Gladys. */
+  async setSession(value) {
+    this.stored = value;
+    this.sessionPending = true;
+    return this.saveSession();
+  }
+
+  /** Saves the tokens in the configuration of Gladys; false when it failed (tried again later). */
+  async saveSession() {
+    if (this.sessionPending) {
+      const value = this.stored;
+      try {
+        await this.gladys.setConfig({ [SESSION_KEY]: value ?? '' });
+      } catch (err) {
+        this.logger.warn(`Oura: tokens not saved in Gladys (${err?.status ?? 'error'})`);
+        return false;
+      }
+      if (this.stored === value) {
+        this.sessionPending = false;
+      }
+    }
+    if (this.memory.legacySession) {
+      // Gladys holds the tokens now: none left in /data.
+      this.memory.legacySession = null;
+      await this.saveMemory();
+    }
+    return true;
   }
 
   /** The keys of a token request; `endpoint`: the one of the session for a renewal. */
@@ -416,8 +475,8 @@ export class OuraApp {
     this.clearTimer();
     if (kind === 'expired') {
       // The renewal token is useless now: a new authorization replaces it.
-      this.memory.session = null;
       this.clearRenewTimer();
+      await this.setSession(null);
     }
     if (PERSISTED.has(kind)) {
       this.memory.block = { kind, client: this.config.client };
@@ -519,7 +578,7 @@ export class OuraApp {
     // useless; a restart on the same session (another secret saved) keeps it:
     // the renewal token sent is consumed by Oura, the new one must be kept.
     const replaced = () => {
-      const current = this.memory.session;
+      const current = this.stored;
       return !current || current.client !== s.client || current.refreshToken !== s.refreshToken;
     };
     let token;
@@ -551,16 +610,16 @@ export class OuraApp {
       return;
     }
     // Oura's renewal tokens serve once: the new one is kept at once.
-    this.memory.session = {
+    // Saved in Gladys before it is used (a failed save is tried again at each read).
+    await this.setSession({
       client: s.client,
       ...token,
       refreshToken: token.refreshToken ?? s.refreshToken,
       endpoint: s.endpoint ?? this.config.tokenEndpoint,
-    };
+    });
     this.renewFailures = 0;
     this.renewRetryAt = 0;
     this.renewError = undefined;
-    await this.saveMemory();
     if (epoch === this.epoch) {
       this.scheduleRenew();
     }
@@ -684,6 +743,11 @@ export class OuraApp {
     }
     if (this.now() < this.pausedUntil) {
       this.scheduleNext();
+      return;
+    }
+    // Tokens not saved in Gladys yet: tried again before the read.
+    await this.saveSession();
+    if (generation !== this.generation) {
       return;
     }
     const timeout = quick ? TIMINGS.quickTimeout : TIMINGS.requestTimeout;
@@ -1127,8 +1191,9 @@ export class OuraApp {
   }
 
   /**
-   * The code -> a new session, kept in /data; then one read. `{ ok, message }`:
-   * the answer is given once the session is in /data; the Discovery list, the
+   * The code -> a new session, saved in Gladys; then one read. `{ ok, message }`:
+   * the answer is given once the save in Gladys was tried (a failed one is
+   * tried again at each read); the Discovery list, the
    * status and the read follow without being waited for (Gladys acks the
    * OAuth return within 5 s).
    */
@@ -1188,7 +1253,9 @@ export class OuraApp {
     this.epoch += 1;
     const mine = this.epoch;
     // The session remembers its token endpoint: it is renewed there.
-    this.memory.session = { client, ...token, endpoint };
+    // In memory at once (a renewal of the old session sees it replaced), then saved in Gladys.
+    this.stored = { client, ...token, endpoint };
+    this.sessionPending = true;
     this.memory.block = null;
     this.blocked = undefined;
     this.failures = 0;
@@ -1201,6 +1268,8 @@ export class OuraApp {
       this.memory.pause = null;
     }
     await this.saveMemory();
+    // A failed save keeps the tokens in memory, saved again at the next read.
+    await this.saveSession();
     this.logger.info('Oura: authorized');
     // One read now, unless one ran less than the interval ago (then at its time).
     const due = (this.memory.lastCycleAt ?? -Infinity) + this.interval;
